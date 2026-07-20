@@ -37,13 +37,23 @@ impl Studio {
     }
 
     pub fn status_payload(&self, authenticated: bool) -> Result<Value> {
+        let model_present = model_files_present(&self.settings);
+        let runtime_ready = python_runtime_ready(&self.settings);
+        // `model_loaded` historically meant "engine has produced audio at least
+        // once in this process" (lazy warm). Keep that meaning, and expose
+        // clearer readiness fields for the UI.
+        let model_warm = self.engine.loaded();
         Ok(json!({
             "product": PRODUCT,
             "service": "Video Work API",
             "status": "ready",
             "configured": self.database.configured()?,
             "authenticated": authenticated,
-            "model_loaded": self.engine.loaded(),
+            "model_present": model_present,
+            "model_runtime_ready": runtime_ready,
+            "model_ready": model_present && runtime_ready,
+            // Warm after first successful generation in this process.
+            "model_loaded": model_warm,
             "mcp": {
                 "path": "/mcp",
                 "configured": self.settings.mcp_token.is_some(),
@@ -250,6 +260,7 @@ impl Studio {
                 "status": "complete",
                 "audio_url": format!("/api/generations/{generation_id}/audio"),
                 "audio_path": destination,
+                "download_name": crate::filenames::download_name_from_text(target_text),
                 "audio": metadata,
             }))
         })();
@@ -275,6 +286,7 @@ impl Studio {
             "id": row.id,
             "status": row.status,
             "audio_name": row.audio_name,
+            "download_name": crate::filenames::download_name_from_text(&row.target_text),
             "target_text": row.target_text,
             "speed": row.speed,
             "created_at": row.created_at,
@@ -300,6 +312,29 @@ impl Studio {
             "srt": srt,
         }))
     }
+}
+
+/// Weights on disk for the pinned CosyVoice3 snapshot (not "in memory").
+fn model_files_present(settings: &Settings) -> bool {
+    let m = &settings.model_dir;
+    m.is_dir()
+        && m.join("config.json").is_file()
+        && m.join("llm.pt").is_file()
+        && m.join("flow.pt").is_file()
+        && m.join("hift.pt").is_file()
+        && settings.cosyvoice_root.is_dir()
+}
+
+/// Python used for CosyVoice/FunClip helpers (venv preferred).
+fn python_runtime_ready(settings: &Settings) -> bool {
+    if let Ok(p) = std::env::var("VWA_PYTHON") {
+        let path = std::path::PathBuf::from(p);
+        if path.is_file() {
+            return true;
+        }
+    }
+    let venv = settings.data_dir.join(".venv/bin/python");
+    venv.is_file()
 }
 
 #[derive(Debug, thiserror::Error)]

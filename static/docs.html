@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("vwa-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}catch(e){document.documentElement.dataset.theme="light"}</script>
+  <title>API Docs · Video Work API</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/theme.js" defer></script>
+</head>
+<body class="docs-page">
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Video Work API">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2 10 C 3.5 5.5, 5 5.5, 6.5 10 C 8 14.5, 9.5 14.5, 11 10 C 12.5 5.8, 14 5.8, 15.5 10 C 16.6 13, 17.6 13, 18.6 10.4"/></svg></span>
+      <span>
+        <span class="eyebrow">VIDEO WORK API</span>
+        <strong data-i18n="title">视频工作 API</strong>
+      </span>
+    </a>
+    <div class="header-actions">
+      <button id="themeToggle" class="secondary compact" type="button" aria-label="切换亮色 / 深色模式">
+        <svg class="icon-moon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M13.4 9.6 A5.8 5.8 0 1 1 6.4 2.6 A4.5 4.5 0 0 0 13.4 9.6 Z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1.2v1.8M8 13v1.8M1.2 8h1.8M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3"/></g></svg>
+      </button>
+      <button id="language" class="secondary compact" type="button">English</button>
+      <a class="button secondary compact" href="/" data-i18n="backHome">返回工作台</a>
+    </div>
+  </header>
+
+  <main class="docs-main">
+    <section class="docs-hero">
+      <p class="eyebrow" data-i18n="docsEyebrow">REFERENCE</p>
+      <h1 data-i18n="docsTitle">API 文档</h1>
+      <p class="hero-lead" data-i18n="docsLead">
+        面向浏览器会话与 AI Agent 的认证 HTTP API。错误统一为
+        <code>{"error":{"code":"…","message":"…"}}</code>。
+      </p>
+      <div class="docs-meta">
+        <span class="docs-chip"><code>/api/*</code> REST</span>
+        <span class="docs-chip"><code>POST /mcp</code> MCP</span>
+        <span class="docs-chip" data-i18n="docsCookie">Cookie: vwa_session</span>
+      </div>
+    </section>
+
+    <nav class="docs-toc card" aria-label="Table of contents">
+      <p class="eyebrow" data-i18n="toc">目录</p>
+      <ul>
+        <li><a href="#auth" data-i18n="secAuth">认证与源站</a></li>
+        <li><a href="#rest" data-i18n="secRest">REST 端点</a></li>
+        <li><a href="#mcp" data-i18n="secMcp">HTTP MCP</a></li>
+        <li><a href="#examples" data-i18n="secExamples">示例</a></li>
+      </ul>
+    </nav>
+
+    <section id="auth" class="card docs-section">
+      <p class="eyebrow">01</p>
+      <h2 data-i18n="secAuth">认证与源站</h2>
+      <ul class="docs-list">
+        <li data-i18n="auth1">浏览器会话使用 HttpOnly、SameSite=Strict Cookie <code>vwa_session</code>，勿记录明文。</li>
+        <li data-i18n="auth2">非安全方法（POST/PUT/DELETE…）须带 <code>Origin</code>，且 host 与请求 <code>Host</code> 完全一致（same-origin）。</li>
+        <li data-i18n="auth3">MCP 使用 <code>Authorization: Bearer &lt;VWA_MCP_TOKEN&gt;</code>，在有效 Bearer 下豁免同源检查。</li>
+        <li data-i18n="auth4"><code>GET /api/status</code> 公开，不会加载模型。</li>
+      </ul>
+    </section>
+
+    <section id="rest" class="card docs-section">
+      <p class="eyebrow">02</p>
+      <h2 data-i18n="secRest">REST 端点</h2>
+      <div class="endpoint-table" role="table">
+        <div class="endpoint-row endpoint-head" role="row">
+          <span data-i18n="colMethod">方法</span>
+          <span data-i18n="colPath">路径</span>
+          <span data-i18n="colAuth">认证</span>
+          <span data-i18n="colDesc">说明</span>
+        </div>
+
+        <div class="endpoint-row" role="row">
+          <span><code class="method get">GET</code></span>
+          <span><code>/api/status</code></span>
+          <span data-i18n="authPublic">公开</span>
+          <span data-i18n="descStatus">服务状态：configured、model_present、model_ready、funclip_ready、mcp 等。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/setup</code></span>
+          <span data-i18n="authOnce">一次性</span>
+          <span data-i18n="descSetup">JSON <code>{token, password}</code>；password ≥ 12 字符。完成后删除 setup-token。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/auth/login</code></span>
+          <span data-i18n="authPublic">公开</span>
+          <span data-i18n="descLogin">JSON <code>{password}</code>；设置会话 Cookie。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/auth/logout</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descLogout">清除会话。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method get">GET</code></span>
+          <span><code>/api/speakers</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descListSpeakers">列出说话人与参考音色档案。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/speakers</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descAddSpeaker">JSON <code>{name}</code>。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method del">DELETE</code></span>
+          <span><code>/api/speakers/{id}</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descDelSpeaker">须先删除其全部 profiles。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/speakers/{id}/profiles</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descAddProfile">multipart：<code>audio</code>、<code>style_name</code>、<code>prompt_text</code>、<code>consent=true</code>。参考音 5–30 秒。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method del">DELETE</code></span>
+          <span><code>/api/profiles/{id}</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descDelProfile">删除未占用的参考档案。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/generations</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descGenerate">JSON <code>{speaker_id, profile_id, target_text, speed}</code>；speed 0.75–1.25；文案 ≤ 1200 字符。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method get">GET</code></span>
+          <span><code>/api/generations/{id}/audio</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descAudio">返回 WAV 音频。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/videos/subtitles</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descSubtitles">JSON <code>{video_path}</code> 相对于 <code>VWA_VIDEO_INPUT_DIR</code>；返回 <code>{segments, srt}</code>。</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="mcp" class="card docs-section">
+      <p class="eyebrow">03</p>
+      <h2 data-i18n="secMcp">HTTP MCP</h2>
+      <p data-i18n="mcpIntro">
+        端点 <code>POST /mcp</code>。JSON-RPC 2.0 方法：
+        <code>initialize</code>、<code>notifications/initialized</code>、
+        <code>tools/list</code>、<code>tools/call</code>。
+      </p>
+      <div class="endpoint-table tools" role="table">
+        <div class="endpoint-row endpoint-head" role="row">
+          <span data-i18n="colTool">工具</span>
+          <span data-i18n="colArgs">参数</span>
+          <span data-i18n="colDesc">说明</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code>get_status</code></span>
+          <span>—</span>
+          <span data-i18n="toolStatus">服务 / 模型 / FunClip 状态</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code>list_speakers</code></span>
+          <span>—</span>
+          <span data-i18n="toolList">说话人与 profiles</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code>create_speaker</code></span>
+          <span><code>{name}</code></span>
+          <span data-i18n="toolCreate">创建说话人</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code>delete_speaker</code></span>
+          <span><code>{speaker_id}</code></span>
+          <span data-i18n="toolDelSpeaker">删除说话人</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code>add_voice_profile</code></span>
+          <span><code>{speaker_id, style_name, prompt_text, audio_path, confirm_rights}</code></span>
+          <span data-i18n="toolAddProfile">audio_path 须在 VWA_REFERENCE_INPUT_DIR 下；confirm_rights 必须为 true</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code>delete_voice_profile</code></span>
+          <span><code>{profile_id}</code></span>
+          <span data-i18n="toolDelProfile">删除 profile</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code>generate_speech</code></span>
+          <span><code>{speaker_id, profile_id, target_text, speed?}</code></span>
+          <span data-i18n="toolGen">返回本地 audio_path</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code>get_generation</code></span>
+          <span><code>{generation_id}</code></span>
+          <span data-i18n="toolGetGen">查询生成任务</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code>extract_video_subtitles</code></span>
+          <span><code>{video_path}</code></span>
+          <span data-i18n="toolSubs">路径须在 VWA_VIDEO_INPUT_DIR 下</span>
+        </div>
+      </div>
+      <p class="docs-note" data-i18n="mcpNote">
+        集成时不得绕过同意确认、认证、文件大小/时长、逐字稿、所有权、路径沙箱或同源检查。
+      </p>
+    </section>
+
+    <section id="examples" class="card docs-section">
+      <p class="eyebrow">04</p>
+      <h2 data-i18n="secExamples">示例</h2>
+
+      <h3 data-i18n="exStatus">状态</h3>
+      <pre class="docs-code"><code>curl -sS "http://127.0.0.1:7860/api/status"</code></pre>
+
+      <h3 data-i18n="exLogin">登录（浏览器同源）</h3>
+      <pre class="docs-code"><code>curl -sS -c cookies.txt -b cookies.txt \
+  -X POST "http://127.0.0.1:7860/api/auth/login" \
+  -H "Origin: http://127.0.0.1:7860" \
+  -H "Content-Type: application/json" \
+  -d '{"password":"YOUR_PASSWORD"}'</code></pre>
+
+      <h3 data-i18n="exMcp">MCP tools/list</h3>
+      <pre class="docs-code"><code>curl -sS -X POST "http://127.0.0.1:7860/mcp" \
+  -H "Authorization: Bearer $VWA_MCP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'</code></pre>
+
+      <h3 data-i18n="exSubs">字幕提取</h3>
+      <pre class="docs-code"><code>curl -sS -c cookies.txt -b cookies.txt \
+  -X POST "http://127.0.0.1:7860/api/videos/subtitles" \
+  -H "Origin: http://127.0.0.1:7860" \
+  -H "Content-Type: application/json" \
+  -d '{"video_path":"clip.mp4"}'</code></pre>
+    </section>
+  </main>
+
+  <script>
+    const translations = {
+      zh: {
+        title: "视频工作 API",
+        backHome: "返回工作台",
+        docsEyebrow: "REFERENCE",
+        docsTitle: "API 文档",
+        docsLead: "面向浏览器会话与 AI Agent 的认证 HTTP API。错误统一为 {\"error\":{\"code\":\"…\",\"message\":\"…\"}}。",
+        docsCookie: "Cookie: vwa_session",
+        toc: "目录",
+        secAuth: "认证与源站",
+        secRest: "REST 端点",
+        secMcp: "HTTP MCP",
+        secExamples: "示例",
+        auth1: "浏览器会话使用 HttpOnly、SameSite=Strict Cookie vwa_session，勿记录明文。",
+        auth2: "非安全方法（POST/PUT/DELETE…）须带 Origin，且 host 与请求 Host 完全一致（same-origin）。",
+        auth3: "MCP 使用 Authorization: Bearer <VWA_MCP_TOKEN>，在有效 Bearer 下豁免同源检查。",
+        auth4: "GET /api/status 公开，不会加载模型。",
+        colMethod: "方法",
+        colPath: "路径",
+        colAuth: "认证",
+        colDesc: "说明",
+        colTool: "工具",
+        colArgs: "参数",
+        authPublic: "公开",
+        authOnce: "一次性",
+        authSession: "会话",
+        descStatus: "服务状态：configured、model_present、model_ready、funclip_ready、mcp 等。",
+        descSetup: "JSON {token, password}；password ≥ 12 字符。完成后删除 setup-token。",
+        descLogin: "JSON {password}；设置会话 Cookie。",
+        descLogout: "清除会话。",
+        descListSpeakers: "列出说话人与参考音色档案。",
+        descAddSpeaker: "JSON {name}。",
+        descDelSpeaker: "须先删除其全部 profiles。",
+        descAddProfile: "multipart：audio、style_name、prompt_text、consent=true。参考音 5–30 秒。",
+        descDelProfile: "删除未占用的参考档案。",
+        descGenerate: "JSON {speaker_id, profile_id, target_text, speed}；speed 0.75–1.25；文案 ≤ 1200 字符。",
+        descAudio: "返回 WAV 音频。",
+        descSubtitles: "JSON {video_path} 相对于 VWA_VIDEO_INPUT_DIR；返回 {segments, srt}。",
+        mcpIntro: "端点 POST /mcp。JSON-RPC 2.0 方法：initialize、notifications/initialized、tools/list、tools/call。",
+        toolStatus: "服务 / 模型 / FunClip 状态",
+        toolList: "说话人与 profiles",
+        toolCreate: "创建说话人",
+        toolDelSpeaker: "删除说话人",
+        toolAddProfile: "audio_path 须在 VWA_REFERENCE_INPUT_DIR 下；confirm_rights 必须为 true",
+        toolDelProfile: "删除 profile",
+        toolGen: "返回本地 audio_path",
+        toolGetGen: "查询生成任务",
+        toolSubs: "路径须在 VWA_VIDEO_INPUT_DIR 下",
+        mcpNote: "集成时不得绕过同意确认、认证、文件大小/时长、逐字稿、所有权、路径沙箱或同源检查。",
+        exStatus: "状态",
+        exLogin: "登录（浏览器同源）",
+        exMcp: "MCP tools/list",
+        exSubs: "字幕提取",
+      },
+      en: {
+        title: "Video Work API",
+        backHome: "Back to studio",
+        docsEyebrow: "REFERENCE",
+        docsTitle: "API documentation",
+        docsLead: "Authenticated HTTP API for browser sessions and AI agents. Errors use {\"error\":{\"code\":\"…\",\"message\":\"…\"}}.",
+        docsCookie: "Cookie: vwa_session",
+        toc: "Contents",
+        secAuth: "Auth & origin",
+        secRest: "REST endpoints",
+        secMcp: "HTTP MCP",
+        secExamples: "Examples",
+        auth1: "Browser sessions use an HttpOnly, SameSite=Strict cookie vwa_session — never log its plaintext.",
+        auth2: "Unsafe methods (POST/PUT/DELETE…) require Origin whose host matches Host (same-origin).",
+        auth3: "MCP uses Authorization: Bearer <VWA_MCP_TOKEN>; valid bearer skips same-origin checks.",
+        auth4: "GET /api/status is public and never loads the model.",
+        colMethod: "Method",
+        colPath: "Path",
+        colAuth: "Auth",
+        colDesc: "Description",
+        colTool: "Tool",
+        colArgs: "Arguments",
+        authPublic: "Public",
+        authOnce: "One-time",
+        authSession: "Session",
+        descStatus: "Service status: configured, model_present, model_ready, funclip_ready, mcp, …",
+        descSetup: "JSON {token, password}; password ≥ 12 chars. Deletes setup-token on success.",
+        descLogin: "JSON {password}; sets session cookie.",
+        descLogout: "Clears the session.",
+        descListSpeakers: "List speakers and reference profiles.",
+        descAddSpeaker: "JSON {name}.",
+        descDelSpeaker: "Delete all profiles first.",
+        descAddProfile: "multipart: audio, style_name, prompt_text, consent=true. Reference audio 5–30s.",
+        descDelProfile: "Delete an unused profile.",
+        descGenerate: "JSON {speaker_id, profile_id, target_text, speed}; speed 0.75–1.25; text ≤ 1200 chars.",
+        descAudio: "Authenticated WAV response.",
+        descSubtitles: "JSON {video_path} under VWA_VIDEO_INPUT_DIR; returns {segments, srt}.",
+        mcpIntro: "Endpoint POST /mcp. JSON-RPC 2.0: initialize, notifications/initialized, tools/list, tools/call.",
+        toolStatus: "Service / model / FunClip status",
+        toolList: "Speakers and profiles",
+        toolCreate: "Create a speaker",
+        toolDelSpeaker: "Delete a speaker",
+        toolAddProfile: "audio_path under VWA_REFERENCE_INPUT_DIR; confirm_rights must be true",
+        toolDelProfile: "Delete a profile",
+        toolGen: "Returns local audio_path",
+        toolGetGen: "Fetch a generation job",
+        toolSubs: "Path under VWA_VIDEO_INPUT_DIR",
+        mcpNote: "Do not bypass consent, auth, size/duration, transcript, ownership, path sandbox, or same-origin checks.",
+        exStatus: "Status",
+        exLogin: "Login (browser same-origin)",
+        exMcp: "MCP tools/list",
+        exSubs: "Subtitle extraction",
+      },
+    };
+
+    let language = localStorage.getItem("vwa-language") || "zh";
+    const $ = (s) => document.querySelector(s);
+    function t(key) {
+      return translations[language][key] || key;
+    }
+    function translate() {
+      document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
+      document.querySelectorAll("[data-i18n]").forEach((node) => {
+        node.textContent = t(node.dataset.i18n);
+      });
+      const btn = $("#language");
+      if (btn) btn.textContent = language === "zh" ? "English" : "中文";
+    }
+    $("#language").onclick = () => {
+      language = language === "zh" ? "en" : "zh";
+      localStorage.setItem("vwa-language", language);
+      translate();
+    };
+    translate();
+  </script>
+</body>
+</html>

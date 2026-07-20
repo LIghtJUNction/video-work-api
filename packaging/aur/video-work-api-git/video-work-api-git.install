@@ -56,7 +56,7 @@ _print_banner() {
     echo "First-time setup (as root — reexecs as $_SERVICE_USER):"
     echo "  sudo vwactl setup          # Python venv + CosyVoice/FunClip deps"
     echo "  sudo vwactl init           # DB + one-time setup token"
-    echo "  sudo vwactl model download # multi-GB CosyVoice3 snapshot (opt-in)"
+    echo "  sudo vwactl model download # via hf CLI + Hub cache (opt-in, multi-GB)"
     echo ""
     echo "Optional MCP token in $_CONF_DIR/config.env:"
     echo "  VWA_MCP_TOKEN=\$(openssl rand -hex 32)"

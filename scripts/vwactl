@@ -14,7 +14,7 @@ if [ -x "$installed_root/bin/vwactl" ] || [ -x "$installed_root/vwactl" ]; then
   fi
   data_root=${VWA_DATA_DIR:-$installed_data}
   case "${1:-}" in
-    init|setup|model|import|status|paths|serve)
+    init|token|setup|model|import|status|paths|serve)
       if [ "$(id -u)" -eq 0 ] && [ "${VWA_ADMIN_REEXEC:-0}" != 1 ]; then
         exec runuser \
           --whitelist-environment=VWA_DATA_DIR,VWA_MODEL_DIR,VWA_COSYVOICE_ROOT,VWA_FUNCLIP_ROOT,VWA_SETUP_TOKEN_FILE,VWA_HOST,VWA_PORT,VWA_SSL_CERTFILE,VWA_SSL_KEYFILE,VWA_MCP_TOKEN,VWA_VIDEO_INPUT_DIR,VWA_REFERENCE_INPUT_DIR,VWA_SUBTITLE_TIMEOUT,VWA_PYTHON,VWA_PROJECT_ROOT \

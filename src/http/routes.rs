@@ -20,6 +20,7 @@ use super::limiter::LoginLimiter;
 use crate::audio::{extension_allowed, MAX_UPLOAD_BYTES};
 use crate::error::{AppError, AppResult};
 use crate::mcp::{handle_mcp_message, McpResponse};
+use crate::filenames::{content_disposition_attachment, download_name_from_text};
 use crate::paths::safe_owned_file;
 use crate::security::{
     constant_time_eq, hash_password, new_session_token, token_hash, verify_password,
@@ -36,6 +37,7 @@ pub struct AppState {
 pub fn build_router(state: AppState) -> Router {
     let static_dir = state.studio.settings.static_dir();
     let index = static_dir.join("index.html");
+    let docs = static_dir.join("docs.html");
 
     let api = Router::new()
         .route("/api/status", get(status))
@@ -59,7 +61,8 @@ pub fn build_router(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES as usize + 1024 * 1024));
 
     Router::new()
-        .route("/", get(move || serve_index(index.clone())))
+        .route("/", get(move || serve_html_file(index.clone())))
+        .route("/docs", get(move || serve_html_file(docs.clone())))
         .nest_service("/static", ServeDir::new(static_dir))
         .merge(api)
         .layer(middleware::from_fn_with_state(
@@ -69,15 +72,15 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn serve_index(index: PathBuf) -> impl IntoResponse {
-    match fs::read(&index) {
+async fn serve_html_file(path: PathBuf) -> impl IntoResponse {
+    match fs::read(&path) {
         Ok(bytes) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
             bytes,
         )
             .into_response(),
-        Err(_) => AppError::not_found("index.html missing").into_response(),
+        Err(_) => AppError::not_found("page missing").into_response(),
     }
 }
 
@@ -575,6 +578,11 @@ async fn generate(
                 "id": v.get("id"),
                 "audio_url": v.get("audio_url"),
                 "audio": v.get("audio"),
+                // Browser <a download> prefers a human-readable basename.
+                "download_name": v
+                    .get("download_name")
+                    .cloned()
+                    .unwrap_or_else(|| json!(download_name_from_text(text))),
             });
             Ok((StatusCode::CREATED, Json(slim)).into_response())
         }
@@ -608,11 +616,18 @@ async fn generation_audio(
     AxumPath(generation_id): AxumPath<String>,
 ) -> AppResult<Response> {
     require_auth(&state, &jar)?;
-    let name = state
+    let row = state
         .studio
         .database
-        .complete_generation_audio(&generation_id)?;
-    let path = name.and_then(|n| safe_owned_file(&state.studio.settings.generations_dir(), &n));
+        .generation_by_id(&generation_id)?
+        .filter(|r| r.status == "complete");
+    let Some(row) = row else {
+        return Err(AppError::not_found("Generated audio not found"));
+    };
+    let path = row
+        .audio_name
+        .as_ref()
+        .and_then(|n| safe_owned_file(&state.studio.settings.generations_dir(), n));
     let Some(path) = path else {
         return Err(AppError::not_found("Generated audio not found"));
     };
@@ -620,7 +635,8 @@ async fn generation_audio(
     let mut buf = Vec::new();
     file.read_to_end(&mut buf)
         .map_err(|e| AppError::Internal(e.into()))?;
-    let disposition = format!("attachment; filename=\"{generation_id}.wav\"");
+    // Prefer 前缀…后缀.wav over opaque generation UUID.
+    let disposition = content_disposition_attachment(&row.target_text);
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "audio/wav")

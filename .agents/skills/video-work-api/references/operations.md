@@ -25,13 +25,18 @@ service account. Do not bypass that wrapper or create root-owned files in
 `/var/lib/video-work-api`.
 
 Run `vwactl init` once. It creates private data directories, the SQLite
-database, and a mode-0600 one-time token. Enter that token in the web setup page
-and create a password of at least 12 characters. Successful setup removes the
-token. Do not paste it into logs or chat.
+database, and a mode-0600 one-time token. Print a pending token again with
+`vwactl token` (or `vwactl token --raw` for scripts). Rotate with
+`vwactl token create --rotate` before first web setup. Enter that token in the
+web setup page and create a password of at least 12 characters. Successful setup
+removes the token. Do not paste it into logs or chat.
 
 Run `vwactl model download` only with explicit approval for the multi-gigabyte
-download. It pins both the repository and revision and requests only the files
-listed in `scripts/download_model.py`.
+download. It shells out to the Hugging Face CLI (`hf download`), pins both the
+repository and revision, requests only the files listed in
+`scripts/download_model.py`, and reuses the Hub cache (`~/.cache/huggingface/hub`
+or `HF_HUB_CACHE`). Install `python-huggingface-hub` (or another package that
+provides `hf`) before downloading.
 
 Start a foreground development service with `vwactl serve`. Defaults are
 `0.0.0.0:7860` and `~/.local/share/video-work-api`. Inspect effective

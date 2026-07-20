@@ -13,6 +13,7 @@ license=('Apache-2.0')
 
 depends=(
   'python>=3.10'
+  'python-huggingface-hub' # provides `hf` CLI (model download + Hub cache)
   'uv'
   'ffmpeg'
   'sox'

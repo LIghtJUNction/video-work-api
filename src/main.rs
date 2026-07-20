@@ -1,5 +1,6 @@
 //! `vwactl` — Video Work API control binary.
 
+use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -28,8 +29,23 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Create data dirs and one-time setup token
-    Init,
+    /// Create data dirs and one-time setup token (prints the token)
+    Init {
+        /// Print only the token value (no labels; good for piping)
+        #[arg(long)]
+        raw: bool,
+        /// Replace an existing pending token
+        #[arg(long)]
+        rotate: bool,
+    },
+    /// Show or create the one-time web setup token
+    Token {
+        #[command(subcommand)]
+        command: Option<TokenCommands>,
+        /// Print only the token value (no labels; good for piping)
+        #[arg(long, global = true)]
+        raw: bool,
+    },
     /// Create Python venv for CosyVoice/FunClip vendor dependencies
     Setup,
     /// Model operations
@@ -57,6 +73,18 @@ enum ModelCommands {
     Download,
 }
 
+#[derive(Subcommand, Debug)]
+enum TokenCommands {
+    /// Print the pending one-time setup token (create if missing)
+    Show,
+    /// Create a new one-time setup token
+    Create {
+        /// Replace an existing pending token
+        #[arg(long)]
+        rotate: bool,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -67,7 +95,11 @@ async fn main() -> Result<()> {
     let settings = Settings::from_env()?;
 
     match cli.command {
-        Commands::Init => cmd_init(&settings),
+        Commands::Init { raw, rotate } => cmd_token_ensure(&settings, raw, rotate),
+        Commands::Token { command, raw } => match command.unwrap_or(TokenCommands::Show) {
+            TokenCommands::Show => cmd_token_show(&settings, raw, /*create_if_missing*/ true),
+            TokenCommands::Create { rotate } => cmd_token_ensure(&settings, raw, rotate),
+        },
         Commands::Setup => cmd_setup(&settings),
         Commands::Model {
             command: ModelCommands::Download,
@@ -82,31 +114,138 @@ async fn main() -> Result<()> {
     }
 }
 
-fn cmd_init(settings: &Settings) -> Result<()> {
+/// `vwactl init` / `vwactl token create`: ensure a pending token exists and print it.
+fn cmd_token_ensure(settings: &Settings, raw: bool, rotate: bool) -> Result<()> {
     settings.create_data_dirs()?;
     let db = Database::open(settings.database_path())?;
     if db.configured()? {
-        println!("Already configured; no setup token created.");
+        if raw {
+            bail!("already configured; setup token is not available");
+        }
+        println!("Already configured; first-time setup is complete.");
+        println!("Sign in on the web UI with the admin password (no setup token).");
+        println!(
+            "Tip: vwactl token show   # confirms no pending token after setup"
+        );
         return Ok(());
     }
+
+    if rotate && settings.setup_token_file.exists() {
+        let meta = fs::symlink_metadata(&settings.setup_token_file)?;
+        if meta.file_type().is_symlink() || !meta.is_file() {
+            bail!("Refusing unsafe setup-token path");
+        }
+        fs::remove_file(&settings.setup_token_file).with_context(|| {
+            format!(
+                "remove pending setup token {}",
+                settings.setup_token_file.display()
+            )
+        })?;
+    }
+
     match create_token(&settings.setup_token_file) {
         Ok(token) => {
-            println!("One-time setup token (store it privately):");
-            println!("{token}");
+            print_token(&token, raw, /*created*/ true, settings);
             Ok(())
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            let meta = fs::symlink_metadata(&settings.setup_token_file)?;
-            if meta.file_type().is_symlink() || !meta.is_file() {
-                bail!("Refusing unsafe setup-token path");
-            }
-            eprintln!(
-                "A setup token already exists. Remove it only if you intend to rotate setup."
-            );
-            std::process::exit(1);
+            let token = read_token_file(&settings.setup_token_file)?;
+            print_token(&token, raw, /*created*/ false, settings);
+            Ok(())
         }
         Err(e) => Err(e.into()),
     }
+}
+
+/// `vwactl token` / `vwactl token show`.
+fn cmd_token_show(settings: &Settings, raw: bool, create_if_missing: bool) -> Result<()> {
+    settings.create_data_dirs()?;
+    let db = Database::open(settings.database_path())?;
+    if db.configured()? {
+        if raw {
+            bail!("already configured; setup token is not available");
+        }
+        println!("Already configured; no pending setup token.");
+        println!("Use the admin password on the login page.");
+        return Ok(());
+    }
+
+    if token_file_present(&settings.setup_token_file)? {
+        let token = read_token_file(&settings.setup_token_file)?;
+        print_token(&token, raw, /*created*/ false, settings);
+        return Ok(());
+    }
+
+    if create_if_missing {
+        let token = create_token(&settings.setup_token_file)?;
+        print_token(&token, raw, /*created*/ true, settings);
+        return Ok(());
+    }
+
+    if raw {
+        bail!("no pending setup token");
+    }
+    println!("No pending setup token.");
+    println!("Create one with: vwactl token create");
+    Ok(())
+}
+
+fn print_token(token: &str, raw: bool, created: bool, settings: &Settings) {
+    if raw {
+        // Token only on stdout for scripts / clipboard tools.
+        println!("{token}");
+        return;
+    }
+    if created {
+        println!("One-time setup token (store it privately):");
+    } else {
+        println!("Pending one-time setup token:");
+    }
+    println!("{token}");
+    eprintln!();
+    eprintln!("Paste it in the web UI first-time setup form, then set a 12+ char admin password.");
+    eprintln!(
+        "Token file: {}",
+        settings.setup_token_file.display()
+    );
+    eprintln!("Re-print later:  vwactl token");
+    eprintln!("Rotate:          vwactl token create --rotate");
+    eprintln!("Scripting:       vwactl token --raw");
+}
+
+fn token_file_present(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() || !meta.is_file() {
+                bail!("Refusing unsafe setup-token path");
+            }
+            Ok(true)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn read_token_file(path: &Path) -> Result<String> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        bail!("Refusing unsafe setup-token path");
+    }
+    let mode = meta.permissions().mode() & 0o777;
+    if mode & 0o077 != 0 {
+        eprintln!(
+            "warning: setup token file permissions are {:o} (prefer 0600)",
+            mode
+        );
+    }
+    let token = fs::read_to_string(path)
+        .with_context(|| format!("read setup token {}", path.display()))?
+        .trim()
+        .to_string();
+    if token.is_empty() {
+        bail!("Setup token file is empty");
+    }
+    Ok(token)
 }
 
 fn create_token(path: &Path) -> std::io::Result<String> {
@@ -137,6 +276,8 @@ fn cmd_setup(settings: &Settings) -> Result<()> {
             venv.to_str().context("venv path")?,
             "--python",
             "3.10",
+            // Re-run setup must replace an empty/broken prior venv.
+            "--clear",
         ])
         .status()
         .context("uv venv")?;
@@ -144,19 +285,34 @@ fn cmd_setup(settings: &Settings) -> Result<()> {
         bail!("uv venv failed");
     }
     let python = venv.join("bin").join("python");
-    let cosy_req = settings.cosyvoice_root.join("requirements.txt");
+    // Prefer inference-only pins (no TensorRT / training stack). Fall back to
+    // the vendored CosyVoice requirements when the runtime file is absent.
+    let runtime_req = settings
+        .project_root
+        .join("scripts")
+        .join("requirements-runtime.txt");
+    let vendor_req = settings.cosyvoice_root.join("requirements.txt");
+    let cosy_req = if runtime_req.is_file() {
+        runtime_req
+    } else {
+        vendor_req
+    };
     if cosy_req.is_file() {
+        // CosyVoice pins use multiple extra indexes (PyTorch + onnxruntime-gpu).
+        // uv's default first-index wins and can miss protobuf on the CUDA index.
         let status = Command::new("uv")
             .args([
                 "pip",
                 "install",
                 "--python",
                 python.to_str().unwrap(),
+                "--index-strategy",
+                "unsafe-best-match",
                 "-r",
                 cosy_req.to_str().unwrap(),
             ])
             .status()
-            .context("install CosyVoice deps")?;
+            .context("install CosyVoice runtime deps")?;
         if !status.success() {
             bail!("CosyVoice dependency install failed");
         }
@@ -173,6 +329,8 @@ fn cmd_setup(settings: &Settings) -> Result<()> {
                 "install",
                 "--python",
                 python.to_str().unwrap(),
+                "--index-strategy",
+                "unsafe-best-match",
                 "-r",
                 req.to_str().unwrap(),
             ])
@@ -191,6 +349,9 @@ fn cmd_setup(settings: &Settings) -> Result<()> {
 }
 
 fn cmd_model_download(settings: &Settings) -> Result<()> {
+    // Prefer the official Hugging Face CLI so downloads reuse
+    // ~/.cache/huggingface/hub (or HF_HUB_CACHE). The helper script wraps
+    // `hf download` with the pinned revision and inference-only include list.
     let helper = settings
         .project_root
         .join("scripts")
@@ -198,16 +359,34 @@ fn cmd_model_download(settings: &Settings) -> Result<()> {
     if !helper.is_file() {
         bail!("download_model.py missing at {}", helper.display());
     }
+    if which_bin("hf").is_none() && which_bin("huggingface-cli").is_none() {
+        bail!(
+            "Hugging Face CLI (`hf`) not found on PATH. Install it \
+             (Arch: pacman -S python-huggingface-hub) and retry."
+        );
+    }
+    fs::create_dir_all(&settings.model_dir)
+        .with_context(|| format!("create model dir {}", settings.model_dir.display()))?;
     let status = Command::new("python3")
         .arg(&helper)
         .arg("--output")
         .arg(&settings.model_dir)
         .status()
-        .context("download model")?;
+        .context("run download_model.py (hf download)")?;
     if !status.success() {
-        bail!("model download failed");
+        bail!("model download failed (hf download exited {status})");
     }
+    println!("Model directory: {}", settings.model_dir.display());
     Ok(())
+}
+
+fn which_bin(name: &str) -> Option<PathBuf> {
+    env::var_os("PATH").and_then(|paths| {
+        env::split_paths(&paths).find_map(|dir| {
+            let candidate = dir.join(name);
+            candidate.is_file().then_some(candidate)
+        })
+    })
 }
 
 fn cmd_import(settings: &Settings, path: &Path, confirm_rights: bool) -> Result<()> {
@@ -232,17 +411,49 @@ fn cmd_status(settings: &Settings) -> Result<()> {
         settings.funclip_root.clone(),
         settings.subtitle_timeout_seconds,
     );
+    let model_present = model_files_present(settings);
+    let runtime_ready = python_runtime_ready(settings);
+    let setup_token = if configured {
+        "consumed"
+    } else if token_file_present(&settings.setup_token_file).unwrap_or(false) {
+        "pending"
+    } else {
+        "missing"
+    };
+    let python = resolve_python(settings);
+
     println!(
         "configured: {}",
         if configured { "yes" } else { "no" }
     );
+    println!("setup_token: {setup_token}");
+    if !configured && setup_token == "pending" {
+        println!("  tip: vwactl token          # print the one-time token");
+        println!("  tip: vwactl token --raw    # token only (for copy/pipe)");
+    } else if !configured && setup_token == "missing" {
+        println!("  tip: vwactl init           # create a one-time token");
+    }
     println!(
-        "model: {}",
-        if settings.model_dir.is_dir() {
-            "present"
+        "model_present: {}",
+        if model_present { "yes" } else { "no" }
+    );
+    println!(
+        "model_runtime: {}",
+        if runtime_ready { "yes" } else { "no" }
+    );
+    println!(
+        "model_ready: {}",
+        if model_present && runtime_ready {
+            "yes"
         } else {
-            "missing"
+            "no"
         }
+    );
+    println!(
+        "python: {}",
+        python
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "missing".into())
     );
     println!(
         "cosyvoice: {}",
@@ -266,6 +477,34 @@ fn cmd_status(settings: &Settings) -> Result<()> {
     );
     println!("listen: {}:{}", settings.host, settings.port);
     Ok(())
+}
+
+fn model_files_present(settings: &Settings) -> bool {
+    let m = &settings.model_dir;
+    m.is_dir()
+        && m.join("config.json").is_file()
+        && m.join("llm.pt").is_file()
+        && m.join("flow.pt").is_file()
+        && m.join("hift.pt").is_file()
+        && settings.cosyvoice_root.is_dir()
+}
+
+fn python_runtime_ready(settings: &Settings) -> bool {
+    resolve_python(settings).is_some()
+}
+
+fn resolve_python(settings: &Settings) -> Option<PathBuf> {
+    if let Ok(p) = env::var("VWA_PYTHON") {
+        let path = PathBuf::from(p);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    let venv = settings.data_dir.join(".venv/bin/python");
+    if venv.is_file() {
+        return Some(venv);
+    }
+    None
 }
 
 fn cmd_paths(settings: &Settings) -> Result<()> {

@@ -5,6 +5,7 @@ pub mod config;
 pub mod database;
 pub mod engine;
 pub mod error;
+pub mod filenames;
 pub mod http;
 pub mod importer;
 pub mod mcp;

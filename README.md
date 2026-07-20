@@ -20,9 +20,9 @@ authenticated HTTP API and an **HTTP MCP** server.
 
 ## Requirements
 
-- Linux with **Rust 1.75+** (`cargo`), Python 3.10, `uv`, FFmpeg, SoX, and Git LFS
+- Linux with **Rust 1.75+** (`cargo`), Python 3.10, `uv`, FFmpeg, SoX, Git LFS, and the Hugging Face CLI (`hf`, e.g. `python-huggingface-hub`)
 - NVIDIA CUDA is recommended for CosyVoice; CPU inference is possible but slow
-- Roughly 10 GB for the CosyVoice3 snapshot plus the Python vendor environment
+- Roughly 10 GB for the CosyVoice3 snapshot plus the Python vendor environment (`vwactl model download` runs `hf download` and reuses the Hub cache)
 - FunASR models download on first subtitle extraction
 
 ## Install from source

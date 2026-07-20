@@ -11,6 +11,7 @@ pkgbase = video-work-api-git
 	makedepends = cargo
 	makedepends = rust
 	depends = python>=3.10
+	depends = python-huggingface-hub
 	depends = uv
 	depends = ffmpeg
 	depends = sox
