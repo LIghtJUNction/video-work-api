@@ -1,0 +1,26 @@
+[Unit]
+Description=Video Work API
+After=network.target
+
+[Service]
+Type=simple
+User=video-work-api
+Group=video-work-api
+WorkingDirectory=/usr/lib/video-work-api
+Environment=VWA_DATA_DIR=/var/lib/video-work-api
+Environment=VWA_SETUP_TOKEN_FILE=/var/lib/video-work-api/setup-token
+Environment=VWA_PROJECT_ROOT=/usr/lib/video-work-api
+Environment=VWA_PYTHON=/var/lib/video-work-api/.venv/bin/python
+EnvironmentFile=-/etc/video-work-api/config.env
+ExecStart=/usr/lib/video-work-api/bin/vwactl serve
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/video-work-api
+
+[Install]
+WantedBy=multi-user.target

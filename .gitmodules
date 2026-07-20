@@ -1,0 +1,6 @@
+[submodule "vendor/CosyVoice"]
+	path = vendor/CosyVoice
+	url = https://github.com/FunAudioLLM/CosyVoice.git
+[submodule "vendor/FunClip"]
+	path = vendor/FunClip
+	url = https://github.com/modelscope/FunClip.git

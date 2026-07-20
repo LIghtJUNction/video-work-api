@@ -1,0 +1,53 @@
+#!/bin/sh
+set -eu
+
+installed_root=/usr/lib/video-work-api
+installed_data=/var/lib/video-work-api
+if [ -x "$installed_root/bin/vwactl" ] || [ -x "$installed_root/vwactl" ]; then
+  app_root=$installed_root
+  config_file=/etc/video-work-api/config.env
+  if [ -r "$config_file" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$config_file"
+    set +a
+  fi
+  data_root=${VWA_DATA_DIR:-$installed_data}
+  case "${1:-}" in
+    init|setup|model|import|status|paths|serve)
+      if [ "$(id -u)" -eq 0 ] && [ "${VWA_ADMIN_REEXEC:-0}" != 1 ]; then
+        exec runuser \
+          --whitelist-environment=VWA_DATA_DIR,VWA_MODEL_DIR,VWA_COSYVOICE_ROOT,VWA_FUNCLIP_ROOT,VWA_SETUP_TOKEN_FILE,VWA_HOST,VWA_PORT,VWA_SSL_CERTFILE,VWA_SSL_KEYFILE,VWA_MCP_TOKEN,VWA_VIDEO_INPUT_DIR,VWA_REFERENCE_INPUT_DIR,VWA_SUBTITLE_TIMEOUT,VWA_PYTHON,VWA_PROJECT_ROOT \
+          -u video-work-api \
+          -- env VWA_ADMIN_REEXEC=1 VWA_DATA_DIR="$data_root" "$0" "$@"
+      fi
+      ;;
+  esac
+  if [ -x "$app_root/bin/vwactl" ]; then
+    exec "$app_root/bin/vwactl" "$@"
+  fi
+  exec "$app_root/vwactl" "$@"
+fi
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+app_root=$(dirname -- "$script_dir")
+data_root=${VWA_DATA_DIR:-"${XDG_DATA_HOME:-$HOME/.local/share}/video-work-api"}
+export VWA_PROJECT_ROOT="${VWA_PROJECT_ROOT:-$app_root}"
+
+# Prefer cargo-built binary next to the project, then PATH, then cargo run.
+if [ -x "$app_root/target/release/vwactl" ]; then
+  exec "$app_root/target/release/vwactl" "$@"
+fi
+if [ -x "$app_root/target/debug/vwactl" ]; then
+  exec "$app_root/target/debug/vwactl" "$@"
+fi
+if command -v vwactl >/dev/null 2>&1; then
+  exec vwactl "$@"
+fi
+if command -v cargo >/dev/null 2>&1 && [ -f "$app_root/Cargo.toml" ]; then
+  cd "$app_root"
+  exec cargo run --quiet --bin vwactl -- "$@"
+fi
+
+echo "vwactl binary not found; build with: cargo build --release" >&2
+exit 127

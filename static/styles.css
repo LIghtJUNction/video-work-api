@@ -1,0 +1,44 @@
+:root {
+  color-scheme: dark; --bg:#0c0f14; --panel:#151a22; --line:#293241;
+  --text:#f3f6fb; --muted:#9da9ba; --accent:#63e6be; --danger:#ff8787;
+  font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+* { box-sizing:border-box }
+body { margin:0; background:radial-gradient(circle at 80% -10%,#234338 0,transparent 35%),var(--bg); color:var(--text); min-height:100vh }
+header,main { max-width:1180px; margin:auto; padding:24px }
+header { display:flex; align-items:center; justify-content:space-between; gap:24px }
+h1,h2,h3 { margin:.2rem 0 .8rem; line-height:1.15 }
+.eyebrow { color:var(--accent); font-size:.72rem; font-weight:800; letter-spacing:.14em; margin:0 }
+.header-actions,.inline,.speaker-title,.profile,.recorder-actions { display:flex; align-items:center; gap:12px }
+.pill,.record-state { color:var(--muted); font-size:.86rem }
+.grid { display:grid; grid-template-columns:1.15fr .85fr; gap:20px }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:24px; box-shadow:0 18px 55px #0004 }
+.notice { background:#3d2f18; border:1px solid #8b6f32; border-radius:12px; padding:12px; margin-bottom:16px }
+.hidden { display:none!important }
+form,.recorder { display:grid; gap:15px }
+label { display:grid; gap:6px; color:var(--muted); font-size:.9rem }
+.grow { flex:1 }
+input,textarea,select,button,.button { font:inherit; border-radius:9px; border:1px solid var(--line); padding:10px 12px }
+input,textarea,select { width:100%; background:#0e131a; color:var(--text) }
+button,.button { background:var(--accent); border-color:transparent; color:#08110e; font-weight:750; cursor:pointer; text-align:center; text-decoration:none }
+button.secondary { background:transparent; border-color:var(--line); color:var(--text) }
+button.danger { background:transparent; color:var(--danger); border-color:#613d43; padding:6px 9px; font-size:.8rem }
+button:disabled { opacity:.5; cursor:wait }
+:focus-visible { outline:3px solid #fff; outline-offset:2px }
+.speaker-list { display:grid; gap:14px; margin-top:20px }
+.speaker { border:1px solid var(--line); border-radius:12px; padding:16px }
+.speaker-title,.profile { justify-content:space-between }
+.profiles { display:grid; gap:8px; margin:10px 0 }
+.profile { background:#10151d; border-radius:8px; padding:8px 10px }
+details { border-top:1px solid var(--line); padding-top:10px }
+summary { cursor:pointer; color:var(--accent) }
+.profile-form { margin-top:12px }
+.recorder { border:1px solid var(--line); border-radius:10px; padding:12px; gap:8px }
+.recorder-actions { flex-wrap:wrap; gap:8px }
+.record-state { margin:0 }
+.record-preview,.result audio { width:100% }
+.check { display:flex; align-items:flex-start; flex-direction:row }
+.check input { width:auto; margin-top:5px }
+.result { display:grid; gap:12px; margin-top:20px }
+@media(max-width:800px) { header{align-items:flex-start;flex-direction:column}.grid{grid-template-columns:1fr}.inline{align-items:stretch;flex-direction:column} }
+@media(prefers-reduced-motion:reduce) { *{scroll-behavior:auto!important;transition:none!important} }

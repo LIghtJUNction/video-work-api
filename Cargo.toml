@@ -1,0 +1,58 @@
+[package]
+name = "video-work-api"
+version = "0.1.0"
+edition = "2021"
+description = "Local Video Work API toolkit for AI agents: CosyVoice3 cloning and FunClip subtitles over HTTP MCP"
+license = "Apache-2.0"
+readme = "README.md"
+rust-version = "1.75"
+default-run = "vwactl"
+
+[[bin]]
+name = "vwactl"
+path = "src/main.rs"
+
+[lib]
+name = "video_work_api"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["multipart", "macros"] }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"
+hound = "3.5"
+hmac = "0.12"
+http = "1"
+mime_guess = "2"
+rand = "0.8"
+regex = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+scrypt = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "set-header", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+axum-extra = { version = "0.10", features = ["cookie"] }
+cookie = "0.18"
+subtle = "2"
+url = "2"
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

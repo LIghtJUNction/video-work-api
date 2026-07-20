@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Video Work API · 视频工作 API</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header>
+    <div><p class="eyebrow">VIDEO WORK API</p><h1 data-i18n="title">视频工作 API</h1></div>
+    <div class="header-actions"><span id="modelState" class="pill"></span><button id="language" class="secondary" type="button">English</button><button id="logout" class="secondary hidden" type="button" data-i18n="logout">退出</button></div>
+  </header>
+  <main>
+    <section id="notice" class="notice hidden" role="alert"></section>
+    <section id="setupView" class="card hidden">
+      <h2 data-i18n="setupTitle">首次设置</h2><p data-i18n="setupHelp">运行 vwactl init 后，将一次性令牌和新密码填入此处。</p>
+      <form id="setupForm"><label><span data-i18n="token">一次性令牌</span><input name="token" required autocomplete="one-time-code"></label><label><span data-i18n="password">管理员密码（至少 12 位）</span><input name="password" type="password" minlength="12" required autocomplete="new-password"></label><button data-i18n="finishSetup">完成设置</button></form>
+    </section>
+    <section id="loginView" class="card hidden">
+      <h2 data-i18n="loginTitle">管理员登录</h2><form id="loginForm"><label><span data-i18n="passwordShort">密码</span><input name="password" type="password" required autocomplete="current-password"></label><button data-i18n="login">登录</button></form>
+    </section>
+    <div id="studioView" class="grid hidden">
+      <section class="card library">
+        <div class="section-heading"><div><p class="eyebrow" data-i18n="libraryEyebrow">VOICE LIBRARY</p><h2 data-i18n="library">音色库</h2></div></div>
+        <form id="speakerForm" class="inline"><label class="grow"><span data-i18n="speakerName">说话人名称</span><input name="name" maxlength="100" required></label><button data-i18n="addSpeaker">添加说话人</button></form>
+        <div id="speakers" class="speaker-list"></div>
+      </section>
+      <section class="card generate">
+        <p class="eyebrow" data-i18n="generateEyebrow">GENERATE</p><h2 data-i18n="generateTitle">生成语音</h2>
+        <form id="generateForm">
+          <label><span data-i18n="voiceStyle">说话人 / 语气</span><select id="profileSelect" required></select></label>
+          <label><span data-i18n="targetText">目标文案</span><textarea name="target_text" maxlength="1200" rows="7" required></textarea></label>
+          <label><span><span data-i18n="speed">语速</span> <output id="speedValue">1.00×</output></span><input id="speed" name="speed" type="range" min="0.75" max="1.25" step="0.05" value="1"></label>
+          <button id="generateButton" data-i18n="generateButton">生成音频</button>
+        </form>
+        <div id="result" class="result hidden"><audio id="player" controls></audio><a id="download" class="button" download data-i18n="download">下载 WAV</a></div>
+      </section>
+    </div>
+  </main>
+  <template id="speakerTemplate">
+    <article class="speaker">
+      <div class="speaker-head"><h3></h3><button type="button" class="danger delete-speaker" data-i18n="deleteSpeaker">删除说话人</button></div>
+      <div class="profiles"></div>
+      <form class="profile-form">
+        <p class="hint" data-i18n="recordPreferred">推荐：直接录制 8–15 秒</p>
+        <div class="record-controls">
+          <button type="button" class="record-start" data-i18n="startRecording">开始录音</button>
+          <button type="button" class="record-stop secondary hidden" data-i18n="stopRecording">停止</button>
+          <button type="button" class="record-discard secondary hidden" data-i18n="discardRecording">丢弃重录</button>
+          <span class="record-timer">00:00</span>
+        </div>
+        <p class="record-state"></p>
+        <audio class="record-preview hidden" controls></audio>
+        <label><span data-i18n="styleName">语气名称</span><input name="style_name" maxlength="100" required></label>
+        <label><span data-i18n="audioFile">音频（推荐 8–15 秒）</span><input name="audio" type="file" accept=".wav,.mp3,.m4a,.flac,.ogg,.webm,audio/*"></label>
+        <label><span data-i18n="transcript">参考录音逐字稿</span><textarea name="prompt_text" maxlength="2000" rows="3" required></textarea></label>
+        <label class="checkbox"><input name="consent" type="checkbox" required><span data-i18n="rights">我确认拥有克隆及使用该声音的明确权利和同意。</span></label>
+        <button data-i18n="upload">上传并转换</button>
+      </form>
+    </article>
+  </template>
+  <script src="/static/app.js"></script>
+</body>
+</html>
