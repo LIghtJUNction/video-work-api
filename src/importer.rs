@@ -45,7 +45,10 @@ pub fn import_folder(root: &Path, settings: &Settings, database: &Database) -> R
                 continue;
             }
             if !audio::extension_allowed(&path) {
-                bail!("Unsupported file: {}", path.file_name().unwrap().to_string_lossy());
+                bail!(
+                    "Unsupported file: {}",
+                    path.file_name().unwrap().to_string_lossy()
+                );
             }
             let stem = path
                 .file_stem()
@@ -60,9 +63,7 @@ pub fn import_folder(root: &Path, settings: &Settings, database: &Database) -> R
         for (style, audio_path) in styles {
             let transcript_path = speaker_dir.join(format!("{style}.txt"));
             audio::require_regular(&transcript_path)?;
-            let transcript = fs::read_to_string(&transcript_path)?
-                .trim()
-                .to_string();
+            let transcript = fs::read_to_string(&transcript_path)?.trim().to_string();
             if transcript.is_empty() {
                 bail!(
                     "Empty transcript: {}",

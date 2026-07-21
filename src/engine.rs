@@ -67,10 +67,7 @@ impl SpeechEngine for CosyVoiceEngine {
             bail!("CosyVoice source or model is not installed");
         }
         if !self.helper.is_file() {
-            bail!(
-                "CosyVoice helper missing at {}",
-                self.helper.display()
-            );
+            bail!("CosyVoice helper missing at {}", self.helper.display());
         }
         let status = Command::new(&self.python)
             .arg(&self.helper)

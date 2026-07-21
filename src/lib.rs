@@ -9,6 +9,8 @@ pub mod filenames;
 pub mod http;
 pub mod importer;
 pub mod mcp;
+pub mod model;
+pub mod passkeys;
 pub mod paths;
 pub mod security;
 pub mod studio;

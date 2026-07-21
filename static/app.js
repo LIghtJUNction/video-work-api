@@ -8,6 +8,10 @@ const translations = {
     mcpHint: "MCP 服务器运行在此端点，使用 Bearer Token 认证。",
     logout: "退出",
     docs: "文档",
+    downloadModel: "下载模型",
+    downloadingModel: "下载中…",
+    confirmModelDownload: "模型下载约需 10 GB 网络流量和磁盘空间，确认开始吗？",
+    modelDownloadFailed: "模型下载失败，请查看服务日志后重试。",
     setupTitle: "首次设置",
     setupHelp: "运行 vwactl init 后，将一次性令牌和新密码填入此处。",
     token: "一次性令牌",
@@ -16,6 +20,17 @@ const translations = {
     finishSetup: "完成设置",
     loginTitle: "管理员登录",
     login: "登录",
+    or: "或",
+    passkeyLogin: "使用 Passkey 登录",
+    passkeysTitle: "Passkey 管理",
+    passkeysLead: "添加本机或安全密钥，下次可免输密码登录。",
+    passkeyName: "设备名称",
+    addPasskey: "添加 Passkey",
+    noPasskeys: "尚未添加 Passkey。",
+    passkeyUnsupported: "当前浏览器或连接不支持 Passkey；远程访问请使用 HTTPS 域名。",
+    passkeyIpUnsupported:
+      "IP 地址页面不支持 Passkey；请改用 http://localhost:<端口>，远程访问请使用 HTTPS 域名。",
+    passwordRecovery: "管理员密码会保留作为恢复登录方式。",
     libraryEyebrow: "VOICE LIBRARY",
     library: "音色库",
     libraryLead: "管理说话人和已授权的参考音色。",
@@ -31,13 +46,19 @@ const translations = {
     download: "下载 WAV",
     resultReady: "生成完成",
     deleteSpeaker: "删除说话人",
+    renameSpeaker: "重命名",
     addProfile: "添加参考音频",
     styleName: "语气名称",
     audioFile: "音频（推荐 8–15 秒）",
     transcript: "参考录音逐字稿",
     rights: "我确认拥有克隆及使用该声音的明确权利和同意。",
     upload: "上传并转换",
+    renameProfile: "重命名",
     deleteProfile: "删除",
+    renameSave: "保存",
+    renameCancel: "取消",
+    renameEmpty: "名称不能为空。",
+    renameTooLong: "名称最多 100 个字符。",
     noProfiles: "尚无参考音频",
     modelReady: "模型已就绪",
     modelWarm: "模型已热启动",
@@ -66,6 +87,10 @@ const translations = {
     mcpHint: "The MCP server runs at this endpoint with Bearer Token authentication.",
     logout: "Sign out",
     docs: "Docs",
+    downloadModel: "Download model",
+    downloadingModel: "Downloading…",
+    confirmModelDownload: "The model download uses roughly 10 GB of network traffic and disk space. Start now?",
+    modelDownloadFailed: "Model download failed. Check the service logs, then retry.",
     setupTitle: "First-time setup",
     setupHelp: "Run vwactl init, then enter the one-time token and a new password.",
     token: "One-time token",
@@ -74,6 +99,18 @@ const translations = {
     finishSetup: "Complete setup",
     loginTitle: "Admin sign in",
     login: "Sign in",
+    or: "or",
+    passkeyLogin: "Sign in with a passkey",
+    passkeysTitle: "Passkeys",
+    passkeysLead: "Add this device or a security key for passwordless sign-in.",
+    passkeyName: "Device name",
+    addPasskey: "Add passkey",
+    noPasskeys: "No passkeys registered.",
+    passkeyUnsupported:
+      "This browser or connection cannot use passkeys; use an HTTPS domain for remote access.",
+    passkeyIpUnsupported:
+      "Passkeys do not support IP address pages; use http://localhost:<port>, or an HTTPS domain for remote access.",
+    passwordRecovery: "The admin password remains available for account recovery.",
     libraryEyebrow: "VOICE LIBRARY",
     library: "Voice library",
     libraryLead: "Manage speakers and authorized reference voices.",
@@ -89,13 +126,19 @@ const translations = {
     download: "Download WAV",
     resultReady: "Generation complete",
     deleteSpeaker: "Delete speaker",
+    renameSpeaker: "Rename",
     addProfile: "Add reference audio",
     styleName: "Style name",
     audioFile: "Audio (8–15 seconds recommended)",
     transcript: "Exact reference transcript",
     rights: "I confirm I have explicit rights and consent to clone and use this voice.",
     upload: "Upload and convert",
+    renameProfile: "Rename",
     deleteProfile: "Delete",
+    renameSave: "Save",
+    renameCancel: "Cancel",
+    renameEmpty: "Name cannot be empty.",
+    renameTooLong: "Name must be at most 100 characters.",
     noProfiles: "No reference audio yet",
     modelReady: "Model ready",
     modelWarm: "Model warm",
@@ -144,9 +187,10 @@ const recordTranslations = {
 };
 
 let language = localStorage.getItem("vwa-language") || "zh";
-let state = { speakers: [] };
+let state = { speakers: [], passkeys: [] };
 const recorders = new WeakMap();
 const liveStreams = new Set();
+let modelDownloadPoll = null;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -197,6 +241,10 @@ function translate() {
   if (languageButton) {
     languageButton.textContent = language === "zh" ? "English" : "中文";
   }
+  const passkeyLoginSupport = $("#passkeyLoginSupport");
+  if (passkeyLoginSupport) {
+    passkeyLoginSupport.textContent = passkeyUnsupportedMessage();
+  }
 }
 
 function notice(message) {
@@ -210,6 +258,125 @@ function safeReset(form) {
   if (form && typeof form.reset === "function") {
     form.reset();
   }
+}
+
+function stopModelDownloadPolling() {
+  if (modelDownloadPoll !== null) clearTimeout(modelDownloadPoll);
+  modelDownloadPoll = null;
+}
+
+async function refreshModelDownloadStatus() {
+  const button = $("#modelDownload");
+  if (!button || button.classList.contains("hidden")) return;
+  try {
+    const status = await api("/api/model/download");
+    const running = status.state === "running";
+    button.disabled = running;
+    button.textContent = running ? t("downloadingModel") : t("downloadModel");
+    if (status.model_present) {
+      stopModelDownloadPolling();
+      await boot();
+    } else if (status.state === "failed" || status.state === "succeeded") {
+      stopModelDownloadPolling();
+      notice(t("modelDownloadFailed"));
+    } else if (running) {
+      stopModelDownloadPolling();
+      modelDownloadPoll = setTimeout(refreshModelDownloadStatus, 2000);
+    }
+  } catch (error) {
+    stopModelDownloadPolling();
+    notice(error.message);
+  }
+}
+
+function isIpLiteralHostname(hostname = window.location.hostname) {
+  const value = String(hostname).replace(/^\[|\]$/g, "");
+  if (value.includes(":")) return true;
+  const parts = value.split(".");
+  return (
+    parts.length === 4 &&
+    parts.every(
+      (part) => /^\d+$/.test(part) && Number(part) >= 0 && Number(part) <= 255,
+    )
+  );
+}
+
+function passkeysSupported() {
+  return Boolean(
+    window.PublicKeyCredential &&
+      navigator.credentials &&
+      window.isSecureContext &&
+      !isIpLiteralHostname(),
+  );
+}
+
+function passkeyUnsupportedMessage() {
+  return t(isIpLiteralHostname() ? "passkeyIpUnsupported" : "passkeyUnsupported");
+}
+
+function base64urlToBuffer(value) {
+  const padded = String(value).replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0)).buffer;
+}
+
+function bufferToBase64url(value) {
+  if (value === null || value === undefined) return null;
+  const bytes = new Uint8Array(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function creationOptions(publicKey) {
+  return {
+    ...publicKey,
+    challenge: base64urlToBuffer(publicKey.challenge),
+    user: { ...publicKey.user, id: base64urlToBuffer(publicKey.user.id) },
+    excludeCredentials: (publicKey.excludeCredentials || []).map((item) => ({
+      ...item,
+      id: base64urlToBuffer(item.id),
+    })),
+  };
+}
+
+function requestOptions(publicKey) {
+  return {
+    ...publicKey,
+    challenge: base64urlToBuffer(publicKey.challenge),
+    allowCredentials: (publicKey.allowCredentials || []).map((item) => ({
+      ...item,
+      id: base64urlToBuffer(item.id),
+    })),
+  };
+}
+
+function serializeCredential(credential) {
+  const response = credential.response;
+  const serialized = {
+    id: credential.id,
+    rawId: bufferToBase64url(credential.rawId),
+    type: credential.type,
+    extensions: credential.getClientExtensionResults(),
+    response: {
+      clientDataJSON: bufferToBase64url(response.clientDataJSON),
+    },
+  };
+  if (response.attestationObject) {
+    serialized.response.attestationObject = bufferToBase64url(
+      response.attestationObject,
+    );
+    if (typeof response.getTransports === "function") {
+      serialized.response.transports = response.getTransports();
+    }
+  } else {
+    serialized.response.authenticatorData = bufferToBase64url(
+      response.authenticatorData,
+    );
+    serialized.response.signature = bufferToBase64url(response.signature);
+    serialized.response.userHandle = bufferToBase64url(response.userHandle);
+  }
+  return serialized;
 }
 
 async function api(path, options = {}) {
@@ -252,6 +419,13 @@ async function boot() {
   translate();
   try {
     const status = await api("/api/status");
+    const modelDownload = $("#modelDownload");
+    if (modelDownload) {
+      modelDownload.classList.toggle(
+        "hidden",
+        !status.authenticated || status.model_present !== false,
+      );
+    }
     const modelState = $("#modelState");
     if (modelState) {
       // model_loaded = warm after first generation in-process (lazy).
@@ -272,12 +446,30 @@ async function boot() {
       }
     }
     if (!status.configured) {
+      stopModelDownloadPolling();
       setView("setupView");
     } else if (!status.authenticated) {
+      stopModelDownloadPolling();
+      const passkeyLogin = $("#passkeyLogin");
+      if (passkeyLogin) {
+        passkeyLogin.classList.toggle(
+          "hidden",
+          !status.passkey_login_available || !passkeysSupported(),
+        );
+      }
+      const passkeySupport = $("#passkeyLoginSupport");
+      if (passkeySupport) {
+        passkeySupport.textContent = passkeyUnsupportedMessage();
+        passkeySupport.classList.toggle(
+          "hidden",
+          !status.passkey_login_available || passkeysSupported(),
+        );
+      }
       setView("loginView");
     } else {
       setView("studioView");
       await refresh();
+      if (status.model_present === false) await refreshModelDownloadStatus();
     }
   } catch (error) {
     notice(error.message);
@@ -285,11 +477,63 @@ async function boot() {
 }
 
 async function refresh() {
-  state = await api("/api/speakers");
-  if (!state || !Array.isArray(state.speakers)) {
-    state = { speakers: [] };
-  }
+  const [speakers, passkeys] = await Promise.all([
+    api("/api/speakers"),
+    api("/api/auth/passkeys"),
+  ]);
+  state = {
+    speakers: Array.isArray(speakers?.speakers) ? speakers.speakers : [],
+    passkeys: Array.isArray(passkeys?.passkeys) ? passkeys.passkeys : [],
+  };
   renderSpeakers();
+  renderPasskeys();
+}
+
+function renderPasskeys() {
+  const root = $("#passkeyList");
+  const form = $("#passkeyForm");
+  const support = $("#passkeySupport");
+  if (!root) return;
+  const supported = passkeysSupported();
+  if (form) form.classList.toggle("hidden", !supported);
+  if (support) {
+    support.textContent = supported ? "" : passkeyUnsupportedMessage();
+    support.classList.toggle("hidden", supported);
+  }
+  root.replaceChildren();
+  if (!state.passkeys.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = t("noPasskeys");
+    root.appendChild(empty);
+    return;
+  }
+  for (const passkey of state.passkeys) {
+    const row = document.createElement("div");
+    row.className = "passkey-row";
+    const details = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = passkey.name;
+    const date = document.createElement("span");
+    date.textContent = new Date(passkey.created_at * 1000).toLocaleDateString();
+    details.append(name, date);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "danger compact";
+    button.textContent = t("deleteProfile");
+    button.onclick = async () => {
+      if (!confirm(t("confirmDelete"))) return;
+      try {
+        await api(`/api/auth/passkeys/${passkey.id}`, { method: "DELETE" });
+        await refresh();
+        notice("");
+      } catch (error) {
+        notice(error.message);
+      }
+    };
+    row.append(details, button);
+    root.appendChild(row);
+  }
 }
 
 function renderSpeakers() {
@@ -306,9 +550,29 @@ function renderSpeakers() {
     const fragment = $("#speakerTemplate").content.cloneNode(true);
     const article = fragment.querySelector("article");
     article.dataset.id = speaker.id;
-    article.querySelector("h3").textContent = speaker.name;
-    article.querySelector(".delete-speaker").onclick = () =>
-      remove(`/api/speakers/${speaker.id}`);
+    const title = article.querySelector("h3");
+    title.textContent = speaker.name;
+    title.classList.add("speaker-title");
+    title.title = t("renameSpeaker");
+
+    const renameSpeakerBtn = article.querySelector(".rename-speaker");
+    const deleteSpeakerBtn = article.querySelector(".delete-speaker");
+    const beginSpeakerRename = () =>
+      startInlineRename({
+        displayEl: title,
+        current: speaker.name,
+        path: `/api/speakers/${speaker.id}`,
+        bodyKey: "name",
+        maxLength: 100,
+        extraHide: [renameSpeakerBtn, deleteSpeakerBtn].filter(Boolean),
+      });
+    if (renameSpeakerBtn) {
+      renameSpeakerBtn.onclick = beginSpeakerRename;
+    }
+    title.onclick = beginSpeakerRename;
+    if (deleteSpeakerBtn) {
+      deleteSpeakerBtn.onclick = () => remove(`/api/speakers/${speaker.id}`);
+    }
 
     const profiles = article.querySelector(".profiles");
     if (!speaker.profiles.length) {
@@ -317,14 +581,45 @@ function renderSpeakers() {
     speaker.profiles.forEach((profile) => {
       const row = document.createElement("div");
       row.className = "profile";
+
       const label = document.createElement("span");
-      label.textContent = `${profile.style_name} · ${profile.duration_seconds.toFixed(1)}s`;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "danger";
-      button.textContent = t("deleteProfile");
-      button.onclick = () => remove(`/api/profiles/${profile.id}`);
-      row.append(label, button);
+      label.className = "profile-label";
+      label.dataset.style = profile.style_name;
+      label.title = t("renameProfile");
+      renderProfileLabel(label, profile);
+
+      const actions = document.createElement("div");
+      actions.className = "profile-actions";
+
+      const renameBtn = document.createElement("button");
+      renameBtn.type = "button";
+      renameBtn.className = "secondary compact";
+      renameBtn.textContent = t("renameProfile");
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "danger";
+      deleteBtn.textContent = t("deleteProfile");
+      deleteBtn.onclick = () => remove(`/api/profiles/${profile.id}`);
+
+      const beginProfileRename = () =>
+        startInlineRename({
+          displayEl: label,
+          current: profile.style_name,
+          path: `/api/profiles/${profile.id}`,
+          bodyKey: "style_name",
+          maxLength: 100,
+          extraHide: [renameBtn, deleteBtn],
+          onRenderDisplay: (el, value) => {
+            profile.style_name = value;
+            renderProfileLabel(el, profile);
+          },
+        });
+      renameBtn.onclick = beginProfileRename;
+      label.onclick = beginProfileRename;
+
+      actions.append(renameBtn, deleteBtn);
+      row.append(label, actions);
       profiles.append(row);
 
       const option = document.createElement("option");
@@ -345,6 +640,14 @@ function renderSpeakers() {
   translate();
 }
 
+function renderProfileLabel(el, profile) {
+  const secs =
+    typeof profile.duration_seconds === "number"
+      ? profile.duration_seconds.toFixed(1)
+      : "—";
+  el.textContent = `${profile.style_name} · ${secs}s`;
+}
+
 async function remove(path) {
   if (!confirm(t("confirmDelete"))) return;
   try {
@@ -353,6 +656,124 @@ async function remove(path) {
   } catch (error) {
     notice(error.message);
   }
+}
+
+/** Inline rename editor (speaker name or profile style). */
+function startInlineRename({
+  displayEl,
+  current,
+  path,
+  bodyKey,
+  maxLength = 100,
+  extraHide = [],
+  onRenderDisplay,
+}) {
+  if (!displayEl || displayEl.dataset.editing === "1") return;
+  displayEl.dataset.editing = "1";
+
+  const parent = displayEl.parentElement;
+  if (!parent) return;
+
+  const editor = document.createElement("div");
+  editor.className = "inline-rename";
+  editor.setAttribute("role", "group");
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "inline-rename-input";
+  input.maxLength = maxLength;
+  input.value = current || "";
+  input.setAttribute("aria-label", t("renameSpeaker"));
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "compact";
+  saveBtn.textContent = t("renameSave");
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "secondary compact";
+  cancelBtn.textContent = t("renameCancel");
+
+  editor.append(input, saveBtn, cancelBtn);
+  displayEl.classList.add("hidden");
+  extraHide.forEach((node) => node && node.classList.add("hidden"));
+  parent.insertBefore(editor, displayEl.nextSibling);
+  input.focus();
+  input.select();
+
+  let closed = false;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    editor.remove();
+    displayEl.classList.remove("hidden");
+    delete displayEl.dataset.editing;
+    extraHide.forEach((node) => node && node.classList.remove("hidden"));
+  };
+
+  const cancel = () => {
+    cleanup();
+  };
+
+  const save = async () => {
+    const name = input.value.trim();
+    if (!name) {
+      notice(t("renameEmpty"));
+      input.focus();
+      return;
+    }
+    if (name.length > maxLength) {
+      notice(t("renameTooLong"));
+      input.focus();
+      return;
+    }
+    if (name === current) {
+      cleanup();
+      return;
+    }
+    saveBtn.disabled = true;
+    cancelBtn.disabled = true;
+    input.disabled = true;
+    try {
+      await api(path, {
+        method: "PATCH",
+        body: JSON.stringify({ [bodyKey]: name }),
+      });
+      notice("");
+      cleanup();
+      await refresh();
+    } catch (error) {
+      notice(error.message);
+      saveBtn.disabled = false;
+      cancelBtn.disabled = false;
+      input.disabled = false;
+      input.focus();
+    }
+  };
+
+  saveBtn.onclick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    save();
+  };
+  cancelBtn.onclick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    cancel();
+  };
+  input.onkeydown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      save();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancel();
+    }
+  };
+  // Avoid bubbling into row/title click handlers while editing.
+  editor.onclick = (event) => event.stopPropagation();
+  editor.onmousedown = (event) => event.stopPropagation();
 }
 
 function stopStream(stream) {
@@ -527,6 +948,7 @@ if (languageButton) {
     // Only re-render speaker cards when studio data is already loaded.
     if (!$("#studioView")?.classList.contains("hidden")) {
       renderSpeakers();
+      renderPasskeys();
     }
   };
 }
@@ -566,11 +988,74 @@ if (loginForm) {
         body: JSON.stringify(Object.fromEntries(new FormData(form))),
       });
       safeReset(form);
-      setView("studioView");
+      await boot();
+      notice("");
+    } catch (error) {
+      notice(error.message);
+    }
+  };
+}
+
+const passkeyLoginButton = $("#passkeyLogin");
+if (passkeyLoginButton) {
+  passkeyLoginButton.onclick = async () => {
+    try {
+      if (!passkeysSupported()) throw new Error(passkeyUnsupportedMessage());
+      const start = await api("/api/auth/passkeys/login/start", {
+        method: "POST",
+        body: "{}",
+      });
+      const credential = await navigator.credentials.get({
+        publicKey: requestOptions(start.publicKey),
+      });
+      if (!credential) throw new Error(t("failed"));
+      await api("/api/auth/passkeys/login/finish", {
+        method: "POST",
+        body: JSON.stringify({
+          transaction_id: start.transaction_id,
+          credential: serializeCredential(credential),
+        }),
+      });
+      await boot();
+      notice("");
+    } catch (error) {
+      notice(error.message);
+    }
+  };
+}
+
+const passkeyForm = $("#passkeyForm");
+if (passkeyForm) {
+  passkeyForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector("button");
+    try {
+      if (!passkeysSupported()) throw new Error(passkeyUnsupportedMessage());
+      if (button) button.disabled = true;
+      const name = String(new FormData(form).get("name") || "").trim();
+      const start = await api("/api/auth/passkeys/register/start", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      const credential = await navigator.credentials.create({
+        publicKey: creationOptions(start.publicKey),
+      });
+      if (!credential) throw new Error(t("failed"));
+      await api("/api/auth/passkeys/register/finish", {
+        method: "POST",
+        body: JSON.stringify({
+          transaction_id: start.transaction_id,
+          credential: serializeCredential(credential),
+        }),
+      });
+      safeReset(form);
       await refresh();
       notice("");
     } catch (error) {
       notice(error.message);
+    } finally {
+      if (button) button.disabled = false;
     }
   };
 }
@@ -580,9 +1065,33 @@ if (logoutButton) {
   logoutButton.onclick = async () => {
     try {
       await api("/api/auth/logout", { method: "POST", body: "{}" });
-      setView("loginView");
+      stopModelDownloadPolling();
+      await boot();
+      notice("");
     } catch (error) {
       notice(error.message);
+    }
+  };
+}
+
+const modelDownloadButton = $("#modelDownload");
+if (modelDownloadButton) {
+  modelDownloadButton.onclick = async () => {
+    if (!confirm(t("confirmModelDownload"))) return;
+    try {
+      modelDownloadButton.disabled = true;
+      modelDownloadButton.textContent = t("downloadingModel");
+      await api("/api/model/download", { method: "POST", body: "{}" });
+      notice("");
+      await refreshModelDownloadStatus();
+    } catch (error) {
+      modelDownloadButton.disabled = false;
+      modelDownloadButton.textContent = t("downloadModel");
+      if (error.code === "model_download_running") {
+        await refreshModelDownloadStatus();
+      } else {
+        notice(error.message);
+      }
     }
   };
 }
@@ -612,6 +1121,74 @@ const speedValue = $("#speedValue");
 if (speed && speedValue) {
   speed.oninput = (event) => {
     speedValue.textContent = `${Number(event.target.value).toFixed(2)}×`;
+  };
+}
+
+const subtitleForm = $("#subtitleForm");if (subtitleForm) {
+  subtitleForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = $("#subtitleButton");
+    const resultBox = $("#subtitleResult");
+    const segmentsBox = $("#subtitleSegments");
+    const download = $("#subtitleDownload");
+    if (!resultBox || !segmentsBox || !download) return;
+    if (button) {
+      button.disabled = true;
+      button.textContent = t("working");
+    }
+    notice("");
+    try {
+      const data = await api("/api/videos/subtitles", {
+        method: "POST",
+        body: JSON.stringify(Object.fromEntries(new FormData(form))),
+      });
+      const segments = Array.isArray(data?.segments) ? data.segments : [];
+      segmentsBox.textContent = "";
+      if (!segments.length) {
+        const empty = document.createElement("p");
+        empty.className = "hint segment-empty";
+        empty.textContent = t("subtitlesEmpty");
+        segmentsBox.appendChild(empty);
+      } else {
+        for (const seg of segments) {
+          const row = document.createElement("div");
+          row.className = "segment";
+          const time = document.createElement("span");
+          time.className = "segment-time";
+          time.textContent = `${seg.start} → ${seg.end}`;
+          const text = document.createElement("span");
+          text.className = "segment-text";
+          text.textContent = seg.text || "";
+          row.append(time, text);
+          segmentsBox.appendChild(row);
+        }
+      }
+      if (data?.srt) {
+        if (download.dataset.url) URL.revokeObjectURL(download.dataset.url);
+        const url = URL.createObjectURL(
+          new Blob([data.srt], { type: "application/x-subrip" }),
+        );
+        download.dataset.url = url;
+        download.href = url;
+        const raw = String(new FormData(form).get("video_path") || "subtitles");
+        const base =
+          raw.replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "_") || "subtitles";
+        download.download = `${base}.srt`;
+        download.classList.remove("hidden");
+      } else {
+        download.classList.add("hidden");
+      }
+      resultBox.classList.remove("hidden");
+    } catch (error) {
+      resultBox.classList.add("hidden");
+      notice(error.message);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = t("extractSubtitles");
+      }
+    }
   };
 }
 
@@ -661,4 +1238,37 @@ if (generateForm) {
 }
 
 boot();
-window.addEventListener("beforeunload", () => liveStreams.forEach(stopStream));
+window.addEventListener("beforeunload", () => {
+  stopModelDownloadPolling();
+  liveStreams.forEach(stopStream);
+});
+
+const studioLayout = document.querySelector(".studio");
+const libraryToggle = $("#libraryToggle");
+if (studioLayout && libraryToggle) {
+  const key = "vwa-library-collapsed";
+  const narrow = matchMedia("(max-width: 1024px)");
+  const apply = (collapsed) =>
+    studioLayout.classList.toggle("library-collapsed", collapsed);
+  const savedPreference = () => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+  const saved = savedPreference();
+  apply(saved === null ? narrow.matches : saved === "1");
+  libraryToggle.addEventListener("click", () => {
+    const collapsed = !studioLayout.classList.contains("library-collapsed");
+    apply(collapsed);
+    try {
+      localStorage.setItem(key, collapsed ? "1" : "0");
+    } catch {
+      /* storage unavailable */
+    }
+  });
+  narrow.addEventListener?.("change", (event) => {
+    if (savedPreference() === null) apply(event.matches);
+  });
+}

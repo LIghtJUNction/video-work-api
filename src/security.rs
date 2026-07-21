@@ -21,7 +21,7 @@ pub fn hash_password(password: &str) -> anyhow::Result<String> {
         .map_err(|e| anyhow::anyhow!("scrypt: {e}"))?;
     let n = 1u32 << SCRYPT_N_LOG2;
     Ok(format!(
-        "scrypt${n}${SCRYPT_R}${SCRYPT_P}${}${}" ,
+        "scrypt${n}${SCRYPT_R}${SCRYPT_P}${}${}",
         hex::encode(salt),
         hex::encode(digest)
     ))

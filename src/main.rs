@@ -17,6 +17,8 @@ use video_work_api::database::Database;
 use video_work_api::engine::{CosyVoiceEngine, SpeechEngine};
 use video_work_api::http::{build_router, AppState, LoginLimiter};
 use video_work_api::importer::import_folder;
+use video_work_api::model::{download_model, model_files_present, ModelDownloadManager};
+use video_work_api::passkeys::CeremonyStore;
 use video_work_api::studio::Studio;
 use video_work_api::subtitles::{FunClipExtractor, SubtitleExtractor};
 
@@ -103,7 +105,11 @@ async fn main() -> Result<()> {
         Commands::Setup => cmd_setup(&settings),
         Commands::Model {
             command: ModelCommands::Download,
-        } => cmd_model_download(&settings),
+        } => {
+            download_model(&settings)?;
+            println!("Model directory: {}", settings.model_dir.display());
+            Ok(())
+        }
         Commands::Import {
             path,
             confirm_rights,
@@ -124,9 +130,7 @@ fn cmd_token_ensure(settings: &Settings, raw: bool, rotate: bool) -> Result<()> 
         }
         println!("Already configured; first-time setup is complete.");
         println!("Sign in on the web UI with the admin password (no setup token).");
-        println!(
-            "Tip: vwactl token show   # confirms no pending token after setup"
-        );
+        println!("Tip: vwactl token show   # confirms no pending token after setup");
         return Ok(());
     }
 
@@ -204,10 +208,7 @@ fn print_token(token: &str, raw: bool, created: bool, settings: &Settings) {
     println!("{token}");
     eprintln!();
     eprintln!("Paste it in the web UI first-time setup form, then set a 12+ char admin password.");
-    eprintln!(
-        "Token file: {}",
-        settings.setup_token_file.display()
-    );
+    eprintln!("Token file: {}", settings.setup_token_file.display());
     eprintln!("Re-print later:  vwactl token");
     eprintln!("Rotate:          vwactl token create --rotate");
     eprintln!("Scripting:       vwactl token --raw");
@@ -298,6 +299,21 @@ fn cmd_setup(settings: &Settings) -> Result<()> {
         vendor_req
     };
     if cosy_req.is_file() {
+        // The legacy whisper sdist imports pkg_resources without declaring setuptools.
+        let status = Command::new("uv")
+            .args([
+                "pip",
+                "install",
+                "--python",
+                python.to_str().unwrap(),
+                "setuptools==80.10.2",
+            ])
+            .status()
+            .context("install legacy whisper build dependency")?;
+        if !status.success() {
+            bail!("install legacy whisper build dependency failed");
+        }
+
         // CosyVoice pins use multiple extra indexes (PyTorch + onnxruntime-gpu).
         // uv's default first-index wins and can miss protobuf on the CUDA index.
         let status = Command::new("uv")
@@ -308,6 +324,9 @@ fn cmd_setup(settings: &Settings) -> Result<()> {
                 python.to_str().unwrap(),
                 "--index-strategy",
                 "unsafe-best-match",
+                // Reuse the bootstrapped setuptools while building legacy whisper.
+                "--no-build-isolation-package",
+                "openai-whisper",
                 "-r",
                 cosy_req.to_str().unwrap(),
             ])
@@ -348,47 +367,6 @@ fn cmd_setup(settings: &Settings) -> Result<()> {
     Ok(())
 }
 
-fn cmd_model_download(settings: &Settings) -> Result<()> {
-    // Prefer the official Hugging Face CLI so downloads reuse
-    // ~/.cache/huggingface/hub (or HF_HUB_CACHE). The helper script wraps
-    // `hf download` with the pinned revision and inference-only include list.
-    let helper = settings
-        .project_root
-        .join("scripts")
-        .join("download_model.py");
-    if !helper.is_file() {
-        bail!("download_model.py missing at {}", helper.display());
-    }
-    if which_bin("hf").is_none() && which_bin("huggingface-cli").is_none() {
-        bail!(
-            "Hugging Face CLI (`hf`) not found on PATH. Install it \
-             (Arch: pacman -S python-huggingface-hub) and retry."
-        );
-    }
-    fs::create_dir_all(&settings.model_dir)
-        .with_context(|| format!("create model dir {}", settings.model_dir.display()))?;
-    let status = Command::new("python3")
-        .arg(&helper)
-        .arg("--output")
-        .arg(&settings.model_dir)
-        .status()
-        .context("run download_model.py (hf download)")?;
-    if !status.success() {
-        bail!("model download failed (hf download exited {status})");
-    }
-    println!("Model directory: {}", settings.model_dir.display());
-    Ok(())
-}
-
-fn which_bin(name: &str) -> Option<PathBuf> {
-    env::var_os("PATH").and_then(|paths| {
-        env::split_paths(&paths).find_map(|dir| {
-            let candidate = dir.join(name);
-            candidate.is_file().then_some(candidate)
-        })
-    })
-}
-
 fn cmd_import(settings: &Settings, path: &Path, confirm_rights: bool) -> Result<()> {
     if !confirm_rights {
         eprintln!("--confirm-rights is required");
@@ -412,7 +390,7 @@ fn cmd_status(settings: &Settings) -> Result<()> {
         settings.subtitle_timeout_seconds,
     );
     let model_present = model_files_present(settings);
-    let runtime_ready = python_runtime_ready(settings);
+    let runtime_ready = python_runtime_ready(settings) && settings.cosyvoice_root.is_dir();
     let setup_token = if configured {
         "consumed"
     } else if token_file_present(&settings.setup_token_file).unwrap_or(false) {
@@ -422,10 +400,7 @@ fn cmd_status(settings: &Settings) -> Result<()> {
     };
     let python = resolve_python(settings);
 
-    println!(
-        "configured: {}",
-        if configured { "yes" } else { "no" }
-    );
+    println!("configured: {}", if configured { "yes" } else { "no" });
     println!("setup_token: {setup_token}");
     if !configured && setup_token == "pending" {
         println!("  tip: vwactl token          # print the one-time token");
@@ -465,7 +440,11 @@ fn cmd_status(settings: &Settings) -> Result<()> {
     );
     println!(
         "funclip: {}",
-        if extractor.ready() { "ready" } else { "missing" }
+        if extractor.ready() {
+            "ready"
+        } else {
+            "missing"
+        }
     );
     println!(
         "mcp: {}",
@@ -477,16 +456,6 @@ fn cmd_status(settings: &Settings) -> Result<()> {
     );
     println!("listen: {}:{}", settings.host, settings.port);
     Ok(())
-}
-
-fn model_files_present(settings: &Settings) -> bool {
-    let m = &settings.model_dir;
-    m.is_dir()
-        && m.join("config.json").is_file()
-        && m.join("llm.pt").is_file()
-        && m.join("flow.pt").is_file()
-        && m.join("hift.pt").is_file()
-        && settings.cosyvoice_root.is_dir()
 }
 
 fn python_runtime_ready(settings: &Settings) -> bool {
@@ -614,6 +583,8 @@ async fn cmd_serve(settings: Settings) -> Result<()> {
     let state = AppState {
         studio,
         limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_download: Arc::new(ModelDownloadManager::new()),
     };
     let app = build_router(state);
     let addr = format!("{host}:{port}");
@@ -621,6 +592,11 @@ async fn cmd_serve(settings: Settings) -> Result<()> {
         .await
         .with_context(|| format!("bind {addr}"))?;
     tracing::info!("Video Work API listening on http://{addr}");
-    axum::serve(listener, app).await.context("serve")?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .context("serve")?;
     Ok(())
 }

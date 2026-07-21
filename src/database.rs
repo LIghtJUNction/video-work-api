@@ -13,6 +13,11 @@ CREATE TABLE IF NOT EXISTS admin (
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS passkeys (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 100),
+  credential_id TEXT NOT NULL UNIQUE, credential_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS speakers (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL
 );
@@ -72,11 +77,9 @@ impl Database {
     pub fn configured(&self) -> Result<bool> {
         let conn = self.lock()?;
         let row: Option<i64> = conn
-            .query_row(
-                "SELECT singleton FROM admin WHERE singleton=1",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT singleton FROM admin WHERE singleton=1", [], |r| {
+                r.get(0)
+            })
             .optional()?;
         Ok(row.is_some())
     }
@@ -134,18 +137,92 @@ impl Database {
 
     pub fn delete_session(&self, digest: &str) -> Result<()> {
         let conn = self.lock()?;
-        conn.execute(
-            "DELETE FROM sessions WHERE token_hash=?1",
-            params![digest],
-        )?;
+        conn.execute("DELETE FROM sessions WHERE token_hash=?1", params![digest])?;
         Ok(())
+    }
+
+    pub fn count_passkeys(&self) -> Result<u64> {
+        let conn = self.lock()?;
+        let count = conn.query_row("SELECT COUNT(*) FROM passkeys", [], |r| r.get(0))?;
+        Ok(count)
+    }
+
+    pub fn list_passkeys(&self) -> Result<Vec<PasskeyRow>> {
+        let conn = self.lock()?;
+        let mut stmt =
+            conn.prepare("SELECT id,name,created_at FROM passkeys ORDER BY created_at,name")?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(PasskeyRow {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    created_at: r.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn load_passkeys(&self) -> Result<Vec<StoredPasskeyRow>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT id,name,credential_id,credential_json,created_at FROM passkeys \
+             ORDER BY created_at,name",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(StoredPasskeyRow {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    credential_id: r.get(2)?,
+                    credential_json: r.get(3)?,
+                    created_at: r.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn insert_passkey(
+        &self,
+        id: &str,
+        name: &str,
+        credential_id: &str,
+        credential_json: &str,
+    ) -> Result<Option<PasskeyRow>> {
+        let created_at = now_secs();
+        let conn = self.lock()?;
+        let inserted = conn.execute(
+            "INSERT OR IGNORE INTO passkeys(id,name,credential_id,credential_json,created_at) \
+             VALUES(?1,?2,?3,?4,?5)",
+            params![id, name, credential_id, credential_json, created_at],
+        )?;
+        Ok((inserted == 1).then(|| PasskeyRow {
+            id: id.to_string(),
+            name: name.to_string(),
+            created_at,
+        }))
+    }
+
+    pub fn update_passkey(&self, id: &str, credential_json: &str) -> Result<bool> {
+        let conn = self.lock()?;
+        let n = conn.execute(
+            "UPDATE passkeys SET credential_json=?1 WHERE id=?2",
+            params![credential_json, id],
+        )?;
+        Ok(n > 0)
+    }
+
+    pub fn delete_passkey(&self, id: &str) -> Result<bool> {
+        let conn = self.lock()?;
+        let n = conn.execute("DELETE FROM passkeys WHERE id=?1", params![id])?;
+        Ok(n > 0)
     }
 
     pub fn list_speakers(&self) -> Result<Vec<SpeakerRow>> {
         let conn = self.lock()?;
-        let mut stmt = conn.prepare(
-            "SELECT id,name,created_at FROM speakers ORDER BY created_at,name",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT id,name,created_at FROM speakers ORDER BY created_at,name")?;
         let rows = stmt
             .query_map([], |r| {
                 Ok(SpeakerRow {
@@ -237,9 +314,15 @@ impl Database {
 
     pub fn delete_speaker(&self, speaker_id: &str) -> Result<bool> {
         let conn = self.lock()?;
+        let n = conn.execute("DELETE FROM speakers WHERE id=?1", params![speaker_id])?;
+        Ok(n > 0)
+    }
+
+    pub fn rename_speaker(&self, speaker_id: &str, name: &str) -> Result<bool> {
+        let conn = self.lock()?;
         let n = conn.execute(
-            "DELETE FROM speakers WHERE id=?1",
-            params![speaker_id],
+            "UPDATE speakers SET name=?1 WHERE id=?2",
+            params![name, speaker_id],
         )?;
         Ok(n > 0)
     }
@@ -344,11 +427,17 @@ impl Database {
 
     pub fn delete_profile(&self, profile_id: &str) -> Result<()> {
         let conn = self.lock()?;
-        conn.execute(
-            "DELETE FROM profiles WHERE id=?1",
-            params![profile_id],
-        )?;
+        conn.execute("DELETE FROM profiles WHERE id=?1", params![profile_id])?;
         Ok(())
+    }
+
+    pub fn rename_profile_style(&self, profile_id: &str, style_name: &str) -> Result<bool> {
+        let conn = self.lock()?;
+        let n = conn.execute(
+            "UPDATE profiles SET style_name=?1 WHERE id=?2",
+            params![style_name, profile_id],
+        )?;
+        Ok(n > 0)
     }
 
     pub fn insert_generation_running(
@@ -430,6 +519,22 @@ pub struct SpeakerRow {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+pub struct PasskeyRow {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredPasskeyRow {
+    pub id: String,
+    pub name: String,
+    pub credential_id: String,
+    pub credential_json: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ProfileRow {
     pub id: String,
     pub style_name: String,
@@ -476,5 +581,26 @@ mod tests {
         assert!(!db.set_admin("other").unwrap());
         db.create_session("abc").unwrap();
         assert!(db.session_exists("abc").unwrap());
+    }
+
+    #[test]
+    fn passkey_crud_and_duplicate_credential_id() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("t.sqlite3")).unwrap();
+        let row = db
+            .insert_passkey("one", "Laptop", "credential", "{\"v\":1}")
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.name, "Laptop");
+        assert_eq!(db.count_passkeys().unwrap(), 1);
+        assert_eq!(db.list_passkeys().unwrap().len(), 1);
+        assert_eq!(db.load_passkeys().unwrap()[0].credential_json, "{\"v\":1}");
+        assert!(db.update_passkey("one", "{\"v\":2}").unwrap());
+        assert!(db
+            .insert_passkey("two", "Phone", "credential", "{\"v\":1}")
+            .unwrap()
+            .is_none());
+        assert!(db.delete_passkey("one").unwrap());
+        assert_eq!(db.count_passkeys().unwrap(), 0);
     }
 }

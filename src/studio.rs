@@ -10,6 +10,7 @@ use crate::audio::{self, convert_reference, validate_generated_wav, MAX_UPLOAD_B
 use crate::config::Settings;
 use crate::database::Database;
 use crate::engine::SpeechEngine;
+use crate::model::model_files_present;
 use crate::paths::{resolve_under_root, safe_owned_file};
 use crate::subtitles::SubtitleExtractor;
 use crate::{MAX_TEXT_LENGTH, PRODUCT};
@@ -38,7 +39,8 @@ impl Studio {
 
     pub fn status_payload(&self, authenticated: bool) -> Result<Value> {
         let model_present = model_files_present(&self.settings);
-        let runtime_ready = python_runtime_ready(&self.settings);
+        let runtime_ready =
+            python_runtime_ready(&self.settings) && self.settings.cosyvoice_root.is_dir();
         // `model_loaded` historically meant "engine has produced audio at least
         // once in this process" (lazy warm). Keep that meaning, and expose
         // clearer readiness fields for the UI.
@@ -49,6 +51,7 @@ impl Studio {
             "status": "ready",
             "configured": self.database.configured()?,
             "authenticated": authenticated,
+            "passkey_login_available": self.database.count_passkeys()? > 0,
             "model_present": model_present,
             "model_runtime_ready": runtime_ready,
             "model_ready": model_present && runtime_ready,
@@ -115,6 +118,29 @@ impl Studio {
         Ok(())
     }
 
+    pub fn rename_speaker(&self, speaker_id: &str, name: &str) -> Result<Value> {
+        let name = name.trim();
+        if name.is_empty() || name.len() > 100 {
+            bail!("Speaker name must contain 1 to 100 characters");
+        }
+        let current = self
+            .database
+            .speaker_by_id(speaker_id)?
+            .ok_or(StudioError::SpeakerNotFound)?;
+        if current.name == name {
+            return Ok(json!({ "id": current.id, "name": current.name }));
+        }
+        if let Some(other) = self.database.speaker_by_name(name)? {
+            if other.id != speaker_id {
+                return Err(StudioError::NameConflict.into());
+            }
+        }
+        if !self.database.rename_speaker(speaker_id, name)? {
+            return Err(StudioError::SpeakerNotFound.into());
+        }
+        Ok(json!({ "id": speaker_id, "name": name }))
+    }
+
     pub fn add_profile_from_file(
         &self,
         speaker_id: &str,
@@ -179,13 +205,7 @@ impl Studio {
         let source = resolve_under_root(audio_path, root).ok_or_else(|| {
             anyhow!("Audio must be inside the configured reference input directory")
         })?;
-        self.add_profile_from_file(
-            speaker_id,
-            style_name,
-            prompt_text,
-            &source,
-            confirm_rights,
-        )
+        self.add_profile_from_file(speaker_id, style_name, prompt_text, &source, confirm_rights)
     }
 
     pub fn delete_profile(&self, profile_id: &str) -> Result<()> {
@@ -201,6 +221,38 @@ impl Studio {
         self.database.delete_profile(profile_id)?;
         fs::remove_file(path)?;
         Ok(())
+    }
+
+    pub fn rename_profile(&self, profile_id: &str, style_name: &str) -> Result<Value> {
+        let style_name = style_name.trim();
+        if style_name.is_empty() || style_name.len() > 100 {
+            bail!("Style name must contain 1 to 100 characters");
+        }
+        let profile = self
+            .database
+            .profile_by_id(profile_id)?
+            .ok_or(StudioError::ProfileNotFound)?;
+        if profile.style_name == style_name {
+            return Ok(json!({
+                "id": profile.id,
+                "speaker_id": profile.speaker_id,
+                "style_name": profile.style_name,
+            }));
+        }
+        if self
+            .database
+            .profile_exists_style(&profile.speaker_id, style_name)?
+        {
+            return Err(StudioError::NameConflict.into());
+        }
+        if !self.database.rename_profile_style(profile_id, style_name)? {
+            return Err(StudioError::ProfileNotFound.into());
+        }
+        Ok(json!({
+            "id": profile_id,
+            "speaker_id": profile.speaker_id,
+            "style_name": style_name,
+        }))
     }
 
     pub fn generate_speech(
@@ -303,26 +355,14 @@ impl Studio {
 
     pub fn extract_subtitles(&self, video_path_raw: &str) -> Result<Value> {
         let root = self.settings.video_input_dir.as_path();
-        let video_path = resolve_under_root(video_path_raw, root).ok_or_else(|| {
-            anyhow!("Video must be inside the configured video input directory")
-        })?;
+        let video_path = resolve_under_root(video_path_raw, root)
+            .ok_or_else(|| anyhow!("Video must be inside the configured video input directory"))?;
         let (segments, srt) = self.subtitles.extract(&video_path)?;
         Ok(json!({
             "segments": segments,
             "srt": srt,
         }))
     }
-}
-
-/// Weights on disk for the pinned CosyVoice3 snapshot (not "in memory").
-fn model_files_present(settings: &Settings) -> bool {
-    let m = &settings.model_dir;
-    m.is_dir()
-        && m.join("config.json").is_file()
-        && m.join("llm.pt").is_file()
-        && m.join("flow.pt").is_file()
-        && m.join("hift.pt").is_file()
-        && settings.cosyvoice_root.is_dir()
 }
 
 /// Python used for CosyVoice/FunClip helpers (venv preferred).
@@ -353,6 +393,8 @@ pub enum StudioError {
     ProfileFailed,
     #[error("profile_not_found")]
     ProfileNotFound,
+    #[error("name_conflict")]
+    NameConflict,
     #[error("profile_in_use")]
     ProfileInUse,
     #[error("profile_file_invalid")]

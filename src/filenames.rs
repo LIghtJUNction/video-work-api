@@ -57,7 +57,11 @@ fn sanitize_display_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut prev_space = false;
     for ch in text.chars() {
-        if ch.is_control() || matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0')
+        if ch.is_control()
+            || matches!(
+                ch,
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'
+            )
         {
             continue;
         }

@@ -11,6 +11,20 @@ never log or persist its plaintext value.
   `mcp`, and `funclip_ready`.
 - `POST /api/setup` accepts `token` and `password`; available once.
 - `POST /api/auth/login` accepts `password`; `POST /api/auth/logout` signs out.
+- `GET /api/auth/passkeys` lists public passkey metadata for the signed-in admin.
+- `POST /api/auth/passkeys/register/start` accepts `{name}` and
+  `POST /api/auth/passkeys/register/finish` completes browser enrollment. Both
+  require an existing password-authenticated `vwa_session`.
+- `DELETE /api/auth/passkeys/{id}` removes a passkey and requires authentication.
+- `POST /api/auth/passkeys/login/start` and
+  `POST /api/auth/passkeys/login/finish` perform passwordless browser login.
+  WebAuthn requires an HTTPS domain, except that `http://localhost:<port>` is
+  supported for local development. IP-literal origins are not supported. The
+  admin password remains enabled as a recovery login.
+- `POST /api/model/download` starts the fixed, pinned CosyVoice3 download in a
+  single background task; `GET /api/model/download` returns its safe status.
+  Both require an authenticated session. Expect roughly 10 GB of network and
+  disk use, and install the Hugging Face CLI first.
 - `GET /api/speakers` lists the private voice library.
 - `POST /api/speakers` accepts JSON `name`.
 - `DELETE /api/speakers/{id}` requires profiles to be deleted first.

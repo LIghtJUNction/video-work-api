@@ -5,7 +5,7 @@ edition = "2021"
 description = "Local Video Work API toolkit for AI agents: CosyVoice3 cloning and FunClip subtitles over HTTP MCP"
 license = "Apache-2.0"
 readme = "README.md"
-rust-version = "1.75"
+rust-version = "1.88"
 default-run = "vwactl"
 
 [[bin]]
@@ -47,6 +47,7 @@ axum-extra = { version = "0.10", features = ["cookie"] }
 cookie = "0.18"
 subtle = "2"
 url = "2"
+webauthn-rs = { version = "=0.5.5", default-features = false }
 
 [dev-dependencies]
 http-body-util = "0.1"

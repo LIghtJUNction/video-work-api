@@ -21,8 +21,7 @@ pub fn extension_allowed(path: &Path) -> bool {
 }
 
 pub fn require_regular(path: &Path) -> Result<fs::Metadata> {
-    let meta = fs::symlink_metadata(path)
-        .with_context(|| format!("stat {}", path.display()))?;
+    let meta = fs::symlink_metadata(path).with_context(|| format!("stat {}", path.display()))?;
     if meta.file_type().is_symlink() || !meta.is_file() {
         bail!("File must be a regular non-symlink file");
     }
@@ -84,9 +83,7 @@ pub fn convert_reference(source: &Path, destination: &Path) -> Result<f64> {
                 "24000",
                 "-c:a",
                 "pcm_s16le",
-                temporary
-                    .to_str()
-                    .ok_or_else(|| anyhow!("temp path"))?,
+                temporary.to_str().ok_or_else(|| anyhow!("temp path"))?,
             ])
             .status()
             .context("run ffmpeg")?;
@@ -160,12 +157,7 @@ pub fn write_silent_wav(path: &Path, seconds: f64, rate: u32) -> Result<()> {
 }
 
 fn unique_temp(dir: &Path, prefix: &str, suffix: &str) -> Result<PathBuf> {
-    let name = format!(
-        "{}{}{}",
-        prefix,
-        uuid::Uuid::new_v4(),
-        suffix
-    );
+    let name = format!("{}{}{}", prefix, uuid::Uuid::new_v4(), suffix);
     let path = dir.join(name);
     // Ensure exclusive create then close.
     File::create_new(&path)

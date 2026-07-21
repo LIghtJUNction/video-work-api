@@ -62,6 +62,19 @@ pub fn tool_specs() -> Value {
             }
         },
         {
+            "name": "rename_speaker",
+            "description": "Rename a speaker (1–100 characters). Fails if another speaker already uses the name.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "speaker_id": { "type": "string" },
+                    "name": { "type": "string" }
+                },
+                "required": ["speaker_id", "name"],
+                "additionalProperties": false
+            }
+        },
+        {
             "name": "add_voice_profile",
             "description": "Import reference audio from VWA_REFERENCE_INPUT_DIR. Requires confirm_rights=true and an exact transcript.",
             "inputSchema": {
@@ -84,6 +97,19 @@ pub fn tool_specs() -> Value {
                 "type": "object",
                 "properties": { "profile_id": { "type": "string" } },
                 "required": ["profile_id"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "rename_voice_profile",
+            "description": "Rename a voice profile style (1–100 characters). Must be unique per speaker.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "profile_id": { "type": "string" },
+                    "style_name": { "type": "string" }
+                },
+                "required": ["profile_id", "style_name"],
                 "additionalProperties": false
             }
         },
@@ -136,6 +162,12 @@ struct DeleteSpeakerArgs {
 }
 
 #[derive(Debug, Deserialize)]
+struct RenameSpeakerArgs {
+    speaker_id: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct ProfileArgs {
     speaker_id: String,
     style_name: String,
@@ -147,6 +179,12 @@ struct ProfileArgs {
 #[derive(Debug, Deserialize)]
 struct DeleteProfileArgs {
     profile_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RenameProfileArgs {
+    profile_id: String,
+    style_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -188,10 +226,7 @@ impl IntoResponse for McpResponse {
 
 pub fn handle_mcp_message(studio: &Studio, message: Value) -> McpResponse {
     let request_id = message.get("id").cloned().unwrap_or(Value::Null);
-    let method = message
-        .get("method")
-        .and_then(|m| m.as_str())
-        .unwrap_or("");
+    let method = message.get("method").and_then(|m| m.as_str()).unwrap_or("");
 
     match method {
         "initialize" => {
@@ -215,14 +250,8 @@ pub fn handle_mcp_message(studio: &Studio, message: Value) -> McpResponse {
         "tools/list" => McpResponse::Json(mcp_ok(request_id, json!({ "tools": tool_specs() }))),
         "tools/call" => {
             let params = message.get("params").cloned().unwrap_or(json!({}));
-            let name = params
-                .get("name")
-                .and_then(|n| n.as_str())
-                .unwrap_or("");
-            let arguments = params
-                .get("arguments")
-                .cloned()
-                .unwrap_or(json!({}));
+            let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
             if !arguments.is_object() {
                 return McpResponse::Json(mcp_error(
                     request_id,
@@ -249,11 +278,7 @@ pub fn handle_mcp_message(studio: &Studio, message: Value) -> McpResponse {
                 }
             }
         }
-        _ => McpResponse::Json(mcp_error(
-            request_id,
-            -32601,
-            "Unsupported MCP method",
-        )),
+        _ => McpResponse::Json(mcp_error(request_id, -32601, "Unsupported MCP method")),
     }
 }
 
@@ -298,6 +323,14 @@ fn call_tool(studio: &Studio, name: &str, arguments: Value) -> Result<Value, Mcp
                 None,
             ))
         }
+        "rename_speaker" => {
+            let args: RenameSpeakerArgs = serde_json::from_value(arguments)
+                .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
+            let payload = studio
+                .rename_speaker(&args.speaker_id, &args.name)
+                .map_err(map_studio_err)?;
+            Ok(tool_result(payload, None))
+        }
         "add_voice_profile" => {
             let args: ProfileArgs = serde_json::from_value(arguments)
                 .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
@@ -322,6 +355,14 @@ fn call_tool(studio: &Studio, name: &str, arguments: Value) -> Result<Value, Mcp
                 json!({ "deleted": true, "profile_id": args.profile_id }),
                 None,
             ))
+        }
+        "rename_voice_profile" => {
+            let args: RenameProfileArgs = serde_json::from_value(arguments)
+                .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
+            let payload = studio
+                .rename_profile(&args.profile_id, &args.style_name)
+                .map_err(map_studio_err)?;
+            Ok(tool_result(payload, None))
         }
         "generate_speech" => {
             let args: GenerationArgs = serde_json::from_value(arguments)
@@ -374,6 +415,7 @@ fn map_studio_err(err: anyhow::Error) -> McpToolError {
             | StudioError::ProfileNotFound
             | StudioError::GenerationNotFound => McpToolError::NotFound(se.to_string()),
             StudioError::SpeakerHasProfiles
+            | StudioError::NameConflict
             | StudioError::ProfileInUse
             | StudioError::ProfileFileInvalid => McpToolError::Conflict(se.to_string()),
             other => McpToolError::Failed(other.to_string()),

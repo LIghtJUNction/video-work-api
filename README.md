@@ -20,7 +20,7 @@ authenticated HTTP API and an **HTTP MCP** server.
 
 ## Requirements
 
-- Linux with **Rust 1.75+** (`cargo`), Python 3.10, `uv`, FFmpeg, SoX, Git LFS, and the Hugging Face CLI (`hf`, e.g. `python-huggingface-hub`)
+- Linux with **Rust 1.88+** (`cargo`), Python 3.10, `uv`, FFmpeg, SoX, Git LFS, and the Hugging Face CLI (`hf`, e.g. `python-huggingface-hub`)
 - NVIDIA CUDA is recommended for CosyVoice; CPU inference is possible but slow
 - Roughly 10 GB for the CosyVoice3 snapshot plus the Python vendor environment (`vwactl model download` runs `hf download` and reuses the Hub cache)
 - FunASR models download on first subtitle extraction
@@ -38,9 +38,26 @@ export VWA_MCP_TOKEN="$(openssl rand -hex 32)"
 ./scripts/vwactl serve
 ```
 
-`vwactl init` prints a one-time setup token. Open `http://127.0.0.1:7860`,
+`vwactl init` prints a one-time setup token. Open `http://localhost:7860`,
 create the administrator password, then manage voice profiles in the UI or via
 API/MCP.
+
+After signing in with the administrator password, add a passkey from the studio
+to enable passwordless sign-in on future visits. Passkeys require an HTTPS
+domain, except that `http://localhost:<port>` is supported for local development.
+Browser WebAuthn does not support IP-literal origins such as `127.0.0.1` or
+`::1`. Enrollment, listing, and deletion require an
+authenticated `vwa_session`; the administrator password remains available as a
+recovery login. The REST ceremony endpoints are
+`/api/auth/passkeys/register/{start,finish}` and
+`/api/auth/passkeys/login/{start,finish}`.
+
+Authenticated users can explicitly start the pinned model download from the
+header or with `POST /api/model/download`; `GET /api/model/download` reports the
+background task state. It is single-flight, uses the same fixed
+`scripts/download_model.py` path as `vwactl model download`, reuses the Hugging
+Face cache, and requires the Hugging Face CLI plus roughly 10 GB of network and
+disk capacity.
 
 Environment variables (prefix `VWA_`): `VWA_DATA_DIR`, `VWA_MODEL_DIR`,
 `VWA_COSYVOICE_ROOT`, `VWA_FUNCLIP_ROOT`, `VWA_SETUP_TOKEN_FILE`, `VWA_HOST`,

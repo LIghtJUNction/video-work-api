@@ -3,15 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <script>try{document.documentElement.dataset.theme=localStorage.getItem("vwa-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}catch(e){document.documentElement.dataset.theme="light"}</script>
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("vwa-theme")||"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
   <title>Video Work API · 视频工作 API</title>
-  <link rel="stylesheet" href="/static/styles.css">
-  <script src="/static/theme.js" defer></script>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/styles.css?v=20260721">
+  <script src="/static/theme.js?v=20260721" defer></script>
 </head>
 <body>
   <header class="site-header">
     <a class="brand" href="/" aria-label="Video Work API">
-      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2 10 C 3.5 5.5, 5 5.5, 6.5 10 C 8 14.5, 9.5 14.5, 11 10 C 12.5 5.8, 14 5.8, 15.5 10 C 16.6 13, 17.6 13, 18.6 10.4"/></svg></span>
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8.1 3 C 8 1.9, 12 1.8, 11.9 3.1 L 11.8 7.4 C 11.8 9.2, 8.2 9.3, 8.1 7.5 Z"/><path d="M5.6 7.8 C 5.5 12.2, 14.5 12.3, 14.4 7.9"/><path d="M10 12.4 L 10 15.1"/><path d="M7.4 15.9 L 12.6 15.7"/></svg></span>
       <span><span class="eyebrow">VIDEO WORK API</span><strong data-i18n="title">视频工作 API</strong></span>
     </a>
     <div class="header-actions">
@@ -22,6 +23,7 @@
         <svg class="icon-sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1.2v1.8M8 13v1.8M1.2 8h1.8M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3"/></g></svg>
       </button>
       <button id="language" class="secondary compact" type="button">English</button>
+      <button id="modelDownload" class="secondary compact hidden" type="button" data-i18n="downloadModel">下载模型</button>
       <button id="logout" class="secondary compact hidden" type="button" data-i18n="logout">退出</button>
     </div>
   </header>
@@ -46,7 +48,7 @@
           <circle cx="110" cy="230" r="7" fill="#141413"/>
         </svg>
         <div class="endpoint-card">
-          <div class="endpoint-icon" aria-hidden="true">↗</div>
+          <div class="endpoint-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12.5 L 12.2 3.8"/><path d="M5.2 3.6 L 12.4 3.5 L 12.3 10.7"/></svg></div>
           <div><span class="endpoint-label" data-i18n="endpointLabel">MCP SERVER</span><strong><code>/mcp</code></strong><p data-i18n="mcpHint">MCP 服务器运行在此端点，使用 Bearer Token 认证。</p></div>
         </div>
       </div>
@@ -60,16 +62,29 @@
     <section id="loginView" class="card auth-card hidden">
       <span class="step-badge">02</span>
       <h2 data-i18n="loginTitle">管理员登录</h2><form id="loginForm"><label><span data-i18n="passwordShort">密码</span><input name="password" type="password" required autocomplete="current-password"></label><button data-i18n="login">登录</button></form>
+      <div class="auth-divider"><span data-i18n="or">或</span></div>
+      <button id="passkeyLogin" class="secondary hidden" type="button" data-i18n="passkeyLogin">使用 Passkey 登录</button>
+      <p id="passkeyLoginSupport" class="hint hidden" data-i18n="passkeyUnsupported">当前浏览器或连接不支持 Passkey；远程访问请使用 HTTPS。</p>
     </section>
     <div id="studioView" class="hidden">
-      <div class="grid">
-      <section class="card library">
-        <div class="section-heading"><div><p class="eyebrow" data-i18n="libraryEyebrow">VOICE LIBRARY</p><h2 data-i18n="library">音色库</h2><p class="section-lead" data-i18n="libraryLead">管理说话人和已授权的参考音色。</p></div><span class="section-number">01</span></div>
-        <form id="speakerForm" class="inline"><label class="grow"><span data-i18n="speakerName">说话人名称</span><input name="name" maxlength="100" required></label><button data-i18n="addSpeaker">添加说话人</button></form>
-        <div id="speakers" class="speaker-list"></div>
-      </section>
+      <div class="studio">
+      <aside class="card library">
+        <div class="section-heading">
+          <div class="library-title">
+            <p class="eyebrow collapsible" data-i18n="libraryEyebrow">VOICE LIBRARY</p>
+            <h2 data-i18n="library">音色库</h2>
+            <p class="section-lead collapsible" data-i18n="libraryLead">管理说话人和已授权的参考音色。</p>
+          </div>
+          <button id="libraryToggle" class="secondary compact" type="button" aria-label="收起 / 展开音色库">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 2.5 L4.5 8 L10 13.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <form id="speakerForm" class="inline collapsible"><label class="grow"><span data-i18n="speakerName">说话人名称</span><input name="name" maxlength="100" required></label><button data-i18n="addSpeaker">添加说话人</button></form>
+        <div id="speakers" class="speaker-list collapsible"></div>
+      </aside>
+      <div class="studio-main">
       <section class="card generate">
-        <div class="section-heading"><div><p class="eyebrow" data-i18n="generateEyebrow">GENERATE</p><h2 data-i18n="generateTitle">生成语音</h2><p class="section-lead" data-i18n="generateLead">选择音色，输入文案，马上试听结果。</p></div><span class="section-number">02</span></div>
+        <div class="section-heading"><div><p class="eyebrow" data-i18n="generateEyebrow">GENERATE</p><h2 data-i18n="generateTitle">生成语音</h2><p class="section-lead" data-i18n="generateLead">选择音色，输入文案，马上试听结果。</p></div><span class="section-number">01</span></div>
         <form id="generateForm">
           <label><span data-i18n="voiceStyle">说话人 / 语气</span><select id="profileSelect" required></select></label>
           <label><span data-i18n="targetText">目标文案</span><textarea name="target_text" maxlength="1200" rows="7" required></textarea></label>
@@ -78,9 +93,8 @@
         </form>
         <div id="result" class="result hidden"><div class="result-label" data-i18n="resultReady">生成完成</div><audio id="player" controls></audio><a id="download" class="button" download data-i18n="download">下载 WAV</a></div>
       </section>
-      </div>
       <section class="card subtitles">
-        <div class="section-heading"><div><p class="eyebrow" data-i18n="subtitlesEyebrow">SUBTITLES</p><h2 data-i18n="subtitlesTitle">视频字幕提取</h2><p class="section-lead" data-i18n="subtitlesLead">输入 videos 目录中的视频文件名，提取带时间码的字幕。</p></div><span class="section-number">03</span></div>
+        <div class="section-heading"><div><p class="eyebrow" data-i18n="subtitlesEyebrow">SUBTITLES</p><h2 data-i18n="subtitlesTitle">视频字幕提取</h2><p class="section-lead" data-i18n="subtitlesLead">输入 videos 目录中的视频文件名，提取带时间码的字幕。</p></div><span class="section-number">02</span></div>
         <form id="subtitleForm" class="inline">
           <label class="grow"><span data-i18n="videoPath">视频文件名</span><input name="video_path" maxlength="500" required placeholder="clip.mp4"></label>
           <button id="subtitleButton" data-i18n="extractSubtitles">提取字幕</button>
@@ -91,11 +105,26 @@
           <div class="subtitle-actions"><a id="subtitleDownload" class="button secondary" download data-i18n="downloadSrt">下载 SRT</a></div>
         </div>
       </section>
+      <section class="card passkeys">
+        <div class="section-heading"><div><p class="eyebrow">PASSKEYS</p><h2 data-i18n="passkeysTitle">Passkey 管理</h2><p class="section-lead" data-i18n="passkeysLead">添加本机或安全密钥，下次可免输密码登录。</p></div><span class="section-number">03</span></div>
+        <p id="passkeySupport" class="hint hidden"></p>
+        <form id="passkeyForm" class="inline"><label class="grow"><span data-i18n="passkeyName">设备名称</span><input name="name" maxlength="100" required placeholder="MacBook Touch ID"></label><button data-i18n="addPasskey">添加 Passkey</button></form>
+        <div id="passkeyList" class="passkey-list"></div>
+        <p class="hint" data-i18n="passwordRecovery">管理员密码会保留作为恢复登录方式。</p>
+      </section>
+      </div>
+      </div>
     </div>
   </main>
   <template id="speakerTemplate">
     <article class="speaker">
-      <div class="speaker-head"><h3></h3><button type="button" class="danger delete-speaker" data-i18n="deleteSpeaker">删除说话人</button></div>
+      <div class="speaker-head">
+        <h3></h3>
+        <div class="speaker-head-actions">
+          <button type="button" class="secondary compact rename-speaker" data-i18n="renameSpeaker">重命名</button>
+          <button type="button" class="danger delete-speaker" data-i18n="deleteSpeaker">删除说话人</button>
+        </div>
+      </div>
       <div class="profiles"></div>
       <form class="profile-form">
         <p class="hint" data-i18n="recordPreferred">推荐：直接录制 8–15 秒</p>
@@ -115,6 +144,6 @@
       </form>
     </article>
   </template>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260721"></script>
 </body>
 </html>

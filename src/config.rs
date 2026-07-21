@@ -39,14 +39,11 @@ impl Settings {
         let funclip_default = project_root.join("vendor").join("FunClip");
         let funclip_root = match env::var_os("VWA_FUNCLIP_ROOT") {
             Some(v) => Some(PathBuf::from(v).expand_user().canonicalize_lossy()),
-            None if funclip_default.is_dir() => {
-                Some(funclip_default.canonicalize_lossy())
-            }
+            None if funclip_default.is_dir() => Some(funclip_default.canonicalize_lossy()),
             None => None,
         };
         let video_input_dir = env_path("VWA_VIDEO_INPUT_DIR", data.join("videos"));
-        let reference_input_dir =
-            env_path("VWA_REFERENCE_INPUT_DIR", data.join("references"));
+        let reference_input_dir = env_path("VWA_REFERENCE_INPUT_DIR", data.join("references"));
         Ok(Self {
             data_dir: data,
             model_dir: model,
@@ -167,7 +164,8 @@ impl PathExt for &Path {
     }
 
     fn canonicalize_lossy(&self) -> PathBuf {
-        self.canonicalize().unwrap_or_else(|_| (*self).to_path_buf())
+        self.canonicalize()
+            .unwrap_or_else(|_| (*self).to_path_buf())
     }
 }
 

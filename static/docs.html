@@ -3,15 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <script>try{document.documentElement.dataset.theme=localStorage.getItem("vwa-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}catch(e){document.documentElement.dataset.theme="light"}</script>
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("vwa-theme")||"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
   <title>API Docs · Video Work API</title>
-  <link rel="stylesheet" href="/static/styles.css">
-  <script src="/static/theme.js" defer></script>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/styles.css?v=20260721">
+  <script src="/static/theme.js?v=20260721" defer></script>
 </head>
 <body class="docs-page">
   <header class="site-header">
     <a class="brand" href="/" aria-label="Video Work API">
-      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2 10 C 3.5 5.5, 5 5.5, 6.5 10 C 8 14.5, 9.5 14.5, 11 10 C 12.5 5.8, 14 5.8, 15.5 10 C 16.6 13, 17.6 13, 18.6 10.4"/></svg></span>
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8.1 3 C 8 1.9, 12 1.8, 11.9 3.1 L 11.8 7.4 C 11.8 9.2, 8.2 9.3, 8.1 7.5 Z"/><path d="M5.6 7.8 C 5.5 12.2, 14.5 12.3, 14.4 7.9"/><path d="M10 12.4 L 10 15.1"/><path d="M7.4 15.9 L 12.6 15.7"/></svg></span>
       <span>
         <span class="eyebrow">VIDEO WORK API</span>
         <strong data-i18n="title">视频工作 API</strong>
@@ -111,6 +112,12 @@
           <span data-i18n="descAddSpeaker">JSON <code>{name}</code>。</span>
         </div>
         <div class="endpoint-row" role="row">
+          <span><code class="method patch">PATCH</code></span>
+          <span><code>/api/speakers/{id}</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descRenameSpeaker">JSON <code>{name}</code>，1–100 字符；名称冲突返回 409。</span>
+        </div>
+        <div class="endpoint-row" role="row">
           <span><code class="method del">DELETE</code></span>
           <span><code>/api/speakers/{id}</code></span>
           <span data-i18n="authSession">会话</span>
@@ -121,6 +128,12 @@
           <span><code>/api/speakers/{id}/profiles</code></span>
           <span data-i18n="authSession">会话</span>
           <span data-i18n="descAddProfile">multipart：<code>audio</code>、<code>style_name</code>、<code>prompt_text</code>、<code>consent=true</code>。参考音 5–30 秒。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method patch">PATCH</code></span>
+          <span><code>/api/profiles/{id}</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descRenameProfile">JSON <code>{style_name}</code>，同一说话人下唯一。</span>
         </div>
         <div class="endpoint-row" role="row">
           <span><code class="method del">DELETE</code></span>
@@ -184,6 +197,11 @@
           <span data-i18n="toolDelSpeaker">删除说话人</span>
         </div>
         <div class="endpoint-row" role="row">
+          <span><code>rename_speaker</code></span>
+          <span><code>{speaker_id, name}</code></span>
+          <span data-i18n="toolRenameSpeaker">重命名说话人</span>
+        </div>
+        <div class="endpoint-row" role="row">
           <span><code>add_voice_profile</code></span>
           <span><code>{speaker_id, style_name, prompt_text, audio_path, confirm_rights}</code></span>
           <span data-i18n="toolAddProfile">audio_path 须在 VWA_REFERENCE_INPUT_DIR 下；confirm_rights 必须为 true</span>
@@ -192,6 +210,11 @@
           <span><code>delete_voice_profile</code></span>
           <span><code>{profile_id}</code></span>
           <span data-i18n="toolDelProfile">删除 profile</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code>rename_voice_profile</code></span>
+          <span><code>{profile_id, style_name}</code></span>
+          <span data-i18n="toolRenameProfile">重命名语气 / style</span>
         </div>
         <div class="endpoint-row" role="row">
           <span><code>generate_speech</code></span>
@@ -276,8 +299,10 @@
         descLogout: "清除会话。",
         descListSpeakers: "列出说话人与参考音色档案。",
         descAddSpeaker: "JSON {name}。",
+        descRenameSpeaker: "JSON {name}，1–100 字符；名称冲突返回 409。",
         descDelSpeaker: "须先删除其全部 profiles。",
         descAddProfile: "multipart：audio、style_name、prompt_text、consent=true。参考音 5–30 秒。",
+        descRenameProfile: "JSON {style_name}，同一说话人下唯一。",
         descDelProfile: "删除未占用的参考档案。",
         descGenerate: "JSON {speaker_id, profile_id, target_text, speed}；speed 0.75–1.25；文案 ≤ 1200 字符。",
         descAudio: "返回 WAV 音频。",
@@ -287,8 +312,10 @@
         toolList: "说话人与 profiles",
         toolCreate: "创建说话人",
         toolDelSpeaker: "删除说话人",
+        toolRenameSpeaker: "重命名说话人",
         toolAddProfile: "audio_path 须在 VWA_REFERENCE_INPUT_DIR 下；confirm_rights 必须为 true",
         toolDelProfile: "删除 profile",
+        toolRenameProfile: "重命名语气 / style",
         toolGen: "返回本地 audio_path",
         toolGetGen: "查询生成任务",
         toolSubs: "路径须在 VWA_VIDEO_INPUT_DIR 下",
@@ -329,8 +356,10 @@
         descLogout: "Clears the session.",
         descListSpeakers: "List speakers and reference profiles.",
         descAddSpeaker: "JSON {name}.",
+        descRenameSpeaker: "JSON {name}, 1–100 chars; 409 on name conflict.",
         descDelSpeaker: "Delete all profiles first.",
         descAddProfile: "multipart: audio, style_name, prompt_text, consent=true. Reference audio 5–30s.",
+        descRenameProfile: "JSON {style_name}; unique per speaker.",
         descDelProfile: "Delete an unused profile.",
         descGenerate: "JSON {speaker_id, profile_id, target_text, speed}; speed 0.75–1.25; text ≤ 1200 chars.",
         descAudio: "Authenticated WAV response.",
@@ -340,8 +369,10 @@
         toolList: "Speakers and profiles",
         toolCreate: "Create a speaker",
         toolDelSpeaker: "Delete a speaker",
+        toolRenameSpeaker: "Rename a speaker",
         toolAddProfile: "audio_path under VWA_REFERENCE_INPUT_DIR; confirm_rights must be true",
         toolDelProfile: "Delete a profile",
+        toolRenameProfile: "Rename a style / profile",
         toolGen: "Returns local audio_path",
         toolGetGen: "Fetch a generation job",
         toolSubs: "Path under VWA_VIDEO_INPUT_DIR",
