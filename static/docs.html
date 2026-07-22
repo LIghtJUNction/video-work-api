@@ -100,6 +100,12 @@
           <span data-i18n="descLogout">清除会话。</span>
         </div>
         <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/auth/mcp-token</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descMcpToken">仅向同源管理员会话返回 MCP Token；响应禁止缓存。</span>
+        </div>
+        <div class="endpoint-row" role="row">
           <span><code class="method get">GET</code></span>
           <span><code>/api/speakers</code></span>
           <span data-i18n="authSession">会话</span>
@@ -303,6 +309,7 @@
         descSetup: "JSON {token, password}；password ≥ 12 字符。完成后删除 setup-token。",
         descLogin: "JSON {password}；设置会话 Cookie。",
         descLogout: "清除会话。",
+        descMcpToken: "仅向同源管理员会话返回 MCP Token；响应禁止缓存。",
         descListSpeakers: "列出说话人与参考音色档案。",
         descAddSpeaker: "JSON {name}。",
         descRenameSpeaker: "JSON {name}，1–100 字符；名称冲突返回 409。",
@@ -362,6 +369,7 @@
         descSetup: "JSON {token, password}; password ≥ 12 chars. Deletes setup-token on success.",
         descLogin: "JSON {password}; sets session cookie.",
         descLogout: "Clears the session.",
+        descMcpToken: "Returns the MCP token only to a same-origin admin session; the response is not cacheable.",
         descListSpeakers: "List speakers and reference profiles.",
         descAddSpeaker: "JSON {name}.",
         descRenameSpeaker: "JSON {name}, 1–100 chars; 409 on name conflict.",

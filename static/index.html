@@ -49,7 +49,7 @@
         </svg>
         <div class="endpoint-card">
           <div class="endpoint-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12.5 L 12.2 3.8"/><path d="M5.2 3.6 L 12.4 3.5 L 12.3 10.7"/></svg></div>
-          <div><span class="endpoint-label" data-i18n="endpointLabel">MCP SERVER</span><strong><code>/mcp</code></strong><p data-i18n="mcpHint">MCP 服务器运行在此端点，使用 Bearer Token 认证。</p><button id="copyAgentPrompt" class="secondary compact endpoint-copy" type="button" data-i18n="copyAgentPrompt">复制 Agent 提示词</button></div>
+          <div><span class="endpoint-label" data-i18n="endpointLabel">MCP SERVER</span><strong><code>/mcp</code></strong><p data-i18n="mcpHint">MCP 服务器运行在此端点，使用 Bearer Token 认证。</p><button id="copyAgentPrompt" class="secondary compact endpoint-copy hidden" type="button" data-i18n="copyAgentPrompt">复制 Agent 提示词</button></div>
         </div>
       </div>
     </section>
@@ -159,6 +159,7 @@
     </article>
   </template>
   <script src="/static/batch-core.js?v=20260722c"></script>
-  <script src="/static/app.js?v=20260722c"></script>
+  <script src="/static/agent-prompt.js?v=20260722"></script>
+  <script src="/static/app.js?v=20260722d"></script>
 </body>
 </html>

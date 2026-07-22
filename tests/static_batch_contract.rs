@@ -32,9 +32,23 @@ fn batch_workspaces_expose_queue_structure() {
 #[test]
 fn batch_assets_are_loaded_in_order_with_matching_versions() {
     let core = INDEX.find("/static/batch-core.js?v=20260722c").unwrap();
-    let app = INDEX.find("/static/app.js?v=20260722c").unwrap();
-    assert!(core < app);
+    let prompt = INDEX.find("/static/agent-prompt.js?v=20260722").unwrap();
+    let app = INDEX.find("/static/app.js?v=20260722d").unwrap();
+    assert!(core < prompt && prompt < app);
     assert!(INDEX.contains("/static/styles.css?v=20260722c"));
+}
+
+#[test]
+fn agent_prompt_is_auth_gated_and_token_is_ephemeral() {
+    assert!(
+        INDEX.contains("id=\"copyAgentPrompt\" class=\"secondary compact endpoint-copy hidden\"")
+    );
+    assert!(APP.contains("setAgentPromptAvailable(status.mcp?.configured === true)"));
+    assert!(APP.contains("if (response.status === 401) setAgentPromptAvailable(false)"));
+    assert!(APP.contains("createPromptAccessController"));
+    assert!(APP.contains("signal: attempt.signal"));
+    assert!(APP.contains("if (!agentPromptAccess.isCurrent(attempt.id)) return"));
+    assert!(APP.contains("/api/auth/mcp-token"));
 }
 
 #[test]

@@ -339,6 +339,170 @@ async fn mcp_requires_bearer() {
 }
 
 #[tokio::test]
+async fn mcp_token_requires_same_origin_admin_session_and_disables_caching() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("static")).unwrap();
+    fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
+    let settings = test_settings(root);
+    settings.create_data_dirs().unwrap();
+    let db = Database::open(settings.database_path()).unwrap();
+    db.set_admin(&video_work_api::security::hash_password("correct horse battery staple").unwrap())
+        .unwrap();
+    let studio = Arc::new(Studio::new(
+        settings,
+        db,
+        Arc::new(FakeEngine::new()),
+        Arc::new(FakeSubtitles::default()),
+    ));
+    let app = build_router(AppState {
+        studio,
+        limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_download: Arc::new(ModelDownloadManager::new()),
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/mcp-token")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"password":"correct horse battery staple"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let cookie = response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/mcp-token")
+                .header("host", "testserver")
+                .header("origin", "http://evil.example")
+                .header("cookie", &cookie)
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/mcp-token")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "no-store, max-age=0, must-revalidate"
+    );
+    assert_eq!(response.headers().get("pragma").unwrap(), "no-cache");
+    assert_eq!(response.headers().get("expires").unwrap(), "0");
+    let json = body_json(response).await;
+    assert!(json["token"]
+        .as_str()
+        .is_some_and(|value| value == "mcp-secret-token"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let json = body_json(response).await;
+    assert!(json["mcp"]["configured"].as_bool().unwrap());
+    assert!(!json.to_string().contains("mcp-secret-token"));
+}
+
+#[tokio::test]
+async fn mcp_token_endpoint_is_unavailable_when_not_configured() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("static")).unwrap();
+    fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
+    let mut settings = test_settings(root);
+    settings.mcp_token = None;
+    settings.create_data_dirs().unwrap();
+    let db = Database::open(settings.database_path()).unwrap();
+    db.create_session(&video_work_api::security::token_hash("test-session"))
+        .unwrap();
+    let studio = Arc::new(Studio::new(
+        settings,
+        db,
+        Arc::new(FakeEngine::new()),
+        Arc::new(FakeSubtitles::default()),
+    ));
+    let app = build_router(AppState {
+        studio,
+        limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_download: Arc::new(ModelDownloadManager::new()),
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/mcp-token")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", "vwa_session=test-session")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let json = body_json(response).await;
+    assert_eq!(json["error"]["code"], "mcp_not_configured");
+}
+
+#[tokio::test]
 async fn rejects_cross_origin_mutations() {
     let dir = tempdir().unwrap();
     let root = dir.path();
