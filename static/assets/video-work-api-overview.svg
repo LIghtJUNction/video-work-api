@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Video Work API workflow</title>
+  <desc id="desc">Authorized reference audio and sandboxed video input flow through the Rust service to CosyVoice3 voice generation, FunClip stage-one subtitle extraction, the browser studio, REST API, and bearer-authenticated MCP tools.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9b4f3b"/>
+    </marker>
+    <style>
+      .ink { fill: #202421; }
+      .muted { fill: #62675f; }
+      .label { font: 700 18px system-ui, sans-serif; letter-spacing: .04em; }
+      .body { font: 500 15px system-ui, sans-serif; }
+      .small { font: 600 13px system-ui, sans-serif; }
+      .line { fill: none; stroke: #9b4f3b; stroke-width: 3; stroke-linecap: round; marker-end: url(#arrow); }
+      .card { stroke: #202421; stroke-width: 2.5; }
+    </style>
+  </defs>
+  <rect width="1200" height="620" rx="30" fill="#f5f0e6"/>
+  <path d="M42 77 C196 22 351 52 455 92 C586 142 772 53 934 70 C1047 82 1138 132 1160 218 L1160 534 C1051 584 918 563 797 540 C638 510 519 594 337 561 C213 538 101 490 42 408 Z" fill="#fffaf0"/>
+
+  <text x="600" y="61" text-anchor="middle" class="ink label">VIDEO WORK API · LOCAL, AUTHENTICATED, AGENT-READY</text>
+
+  <g transform="translate(55 140)">
+    <rect class="card" width="255" height="128" rx="20" fill="#d8dfcf"/>
+    <circle cx="42" cy="43" r="17" fill="#202421"/>
+    <path d="M70 32 C80 39 80 49 70 56 M83 23 C102 36 102 54 83 67" fill="none" stroke="#202421" stroke-width="4" stroke-linecap="round"/>
+    <text x="28" y="91" class="ink label">AUTHORIZED VOICE</text>
+    <text x="28" y="113" class="muted body">5–30 s + exact transcript</text>
+  </g>
+  <g transform="translate(55 350)">
+    <rect class="card" width="255" height="128" rx="20" fill="#d8dfcf"/>
+    <path d="M28 29 h47 v34 H28 z M75 40 l20 -11 v34 L75 52 z" fill="none" stroke="#202421" stroke-width="4" stroke-linejoin="round"/>
+    <text x="28" y="91" class="ink label">SANDBOXED VIDEO</text>
+    <text x="28" y="113" class="muted body">Path or browser upload</text>
+  </g>
+
+  <path class="line" d="M310 204 H410"/>
+  <path class="line" d="M310 414 H410"/>
+
+  <g transform="translate(410 111)">
+    <rect class="card" width="355" height="398" rx="27" fill="#c9775e"/>
+    <rect x="25" y="25" width="305" height="72" rx="15" fill="#fffaf0" stroke="#202421" stroke-width="2"/>
+    <text x="177" y="57" text-anchor="middle" class="ink label">RUST CONTROL PLANE</text>
+    <text x="177" y="80" text-anchor="middle" class="muted small">auth · consent · SQLite · path policy</text>
+    <path d="M177 98 V132" fill="none" stroke="#202421" stroke-width="3"/>
+    <rect x="25" y="132" width="140" height="121" rx="16" fill="#fffaf0" stroke="#202421" stroke-width="2"/>
+    <text x="95" y="166" text-anchor="middle" class="ink label">CosyVoice3</text>
+    <text x="95" y="190" text-anchor="middle" class="muted body">Pinned 0.5B model</text>
+    <path d="M61 220 q12 -25 24 0 t24 0 t24 0" fill="none" stroke="#9b4f3b" stroke-width="4" stroke-linecap="round"/>
+    <rect x="190" y="132" width="140" height="121" rx="16" fill="#fffaf0" stroke="#202421" stroke-width="2"/>
+    <text x="260" y="166" text-anchor="middle" class="ink label">FunClip</text>
+    <text x="260" y="190" text-anchor="middle" class="muted body">Stage-1 ASR only</text>
+    <path d="M221 214 h78 M221 228 h61" fill="none" stroke="#9b4f3b" stroke-width="4" stroke-linecap="round"/>
+    <rect x="25" y="278" width="305" height="91" rx="16" fill="#202421"/>
+    <text x="177" y="314" text-anchor="middle" fill="#fffaf0" class="label">WAV + TIMED SRT</text>
+    <text x="177" y="341" text-anchor="middle" fill="#d8dfcf" class="body">Private files remain on your machine</text>
+  </g>
+
+  <path class="line" d="M765 202 H859"/>
+  <path class="line" d="M765 310 H859"/>
+  <path class="line" d="M765 418 H859"/>
+
+  <g transform="translate(859 140)">
+    <rect class="card" width="286" height="128" rx="20" fill="#fffaf0"/>
+    <text x="26" y="42" class="ink label">BROWSER STUDIO</text>
+    <text x="26" y="70" class="muted body">Record · batch · rename</text>
+    <text x="26" y="94" class="muted body">Passkeys · WAV · SRT</text>
+    <circle cx="247" cy="92" r="15" fill="#d8dfcf" stroke="#202421" stroke-width="2"/>
+  </g>
+  <g transform="translate(859 286)">
+    <rect class="card" width="286" height="82" rx="20" fill="#fffaf0"/>
+    <text x="26" y="36" class="ink label">REST API</text>
+    <text x="26" y="61" class="muted body">Admin session + same-origin</text>
+  </g>
+  <g transform="translate(859 386)">
+    <rect class="card" width="286" height="92" rx="20" fill="#202421"/>
+    <text x="26" y="39" fill="#fffaf0" class="label">HTTP MCP · 11 TOOLS</text>
+    <text x="26" y="67" fill="#d8dfcf" class="body">Bearer token for trusted agents</text>
+  </g>
+
+  <text x="600" y="576" text-anchor="middle" class="muted small">REFERENCE AUDIO, TOKENS, MODEL WEIGHTS, DATABASES, AND OUTPUTS ARE NEVER COMMITTED</text>
+</svg>
