@@ -55,6 +55,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/setup", post(setup))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
+        .route("/api/auth/mcp-token", post(get_mcp_token))
         .route(
             "/api/model/download",
             get(model_download_status).post(start_model_download),
@@ -686,6 +687,29 @@ async fn logout(State(state): State<AppState>, jar: CookieJar) -> AppResult<Resp
     }
     let jar = jar.remove(Cookie::from(COOKIE_NAME));
     Ok((jar, Json(json!({ "authenticated": false }))).into_response())
+}
+
+async fn get_mcp_token(State(state): State<AppState>, jar: CookieJar) -> AppResult<Response> {
+    require_auth(&state, &jar)?;
+    let token = state.studio.settings.mcp_token.as_deref().ok_or_else(|| {
+        AppError::api(
+            StatusCode::NOT_FOUND,
+            "mcp_not_configured",
+            "The MCP token is not configured",
+        )
+    })?;
+    Ok((
+        [
+            (
+                header::CACHE_CONTROL,
+                "no-store, max-age=0, must-revalidate",
+            ),
+            (header::PRAGMA, "no-cache"),
+            (header::EXPIRES, "0"),
+        ],
+        Json(json!({ "token": token })),
+    )
+        .into_response())
 }
 
 async fn model_download_status(

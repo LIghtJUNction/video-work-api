@@ -275,6 +275,18 @@ function tf(key, values = {}) {
   );
 }
 
+const agentPromptAccess = window.AgentPrompt.createPromptAccessController(
+  (available) => {
+    const button = $("#copyAgentPrompt");
+    if (!button) return;
+    button.classList.toggle("hidden", !available);
+    if (!available) {
+      button.disabled = false;
+      button.textContent = t("copyAgentPrompt");
+    }
+  },
+);
+
 function shortPreview(value, limit = 72) {
   const chars = Array.from(String(value || "").replace(/\s+/g, " ").trim());
   return chars.length <= limit ? chars.join("") : `${chars.slice(0, limit).join("")}…`;
@@ -347,6 +359,10 @@ function safeReset(form) {
   if (form && typeof form.reset === "function") {
     form.reset();
   }
+}
+
+function setAgentPromptAvailable(available) {
+  agentPromptAccess.setAvailable(Boolean(available));
 }
 
 function stopModelDownloadPolling() {
@@ -489,6 +505,7 @@ async function api(path, options = {}) {
     const error = new Error(body.error?.message || `${response.status}`);
     error.code = body.error?.code || null;
     error.status = response.status;
+    if (response.status === 401) setAgentPromptAvailable(false);
     throw error;
   }
   if (response.status === 204) return null;
@@ -502,10 +519,12 @@ function setView(name) {
   });
   const logout = $("#logout");
   if (logout) logout.classList.toggle("hidden", name !== "studioView");
+  if (name !== "studioView") setAgentPromptAvailable(false);
 }
 
 async function boot() {
   translate();
+  setAgentPromptAvailable(false);
   try {
     const status = await api("/api/status");
     const modelDownload = $("#modelDownload");
@@ -557,6 +576,7 @@ async function boot() {
       setView("loginView");
     } else {
       setView("studioView");
+      setAgentPromptAvailable(status.mcp?.configured === true);
       await refresh();
       if (status.model_present === false) await refreshModelDownloadStatus();
     }
@@ -1155,6 +1175,7 @@ if (logoutButton) {
     if (logoutInProgress) return;
     logoutInProgress = true;
     logoutButton.disabled = true;
+    setAgentPromptAvailable(false);
     clearBatchState(false);
     try {
       await api("/api/auth/logout", { method: "POST", body: "{}" });
@@ -1708,54 +1729,6 @@ if (retrySubtitleFailures) {
   retrySubtitleFailures.onclick = () => runSubtitleJobs(subtitleJobs.filter((job) => job.status === "failed"));
 }
 
-function buildAgentPrompt() {
-  const url = `${window.location.origin}/mcp`;
-  if (language === "zh") {
-    return [
-      "请帮我安装 Video Work API 的 MCP 服务器（语音生成 / 字幕提取工具）。",
-      "",
-      "- 传输方式：HTTP（POST，JSON-RPC 2.0）",
-      `- 端点：${url}`,
-      "- 认证：请求头 `Authorization: Bearer <VWA_MCP_TOKEN>`（请向我索取 token，不要猜测或留空）",
-      "",
-      "可用工具：get_status、list_speakers、create_speaker、delete_speaker、rename_speaker、add_voice_profile、delete_voice_profile、rename_voice_profile、generate_speech、get_generation、extract_video_subtitles。",
-      "",
-      "Claude Code 安装命令：",
-      `claude mcp add --transport http video-work-api ${url} --header "Authorization: Bearer <VWA_MCP_TOKEN>"`,
-      "",
-      "opencode 配置（opencode.json 的 mcp 节）：",
-      '"video-work-api": {',
-      '  "type": "remote",',
-      `  "url": "${url}",`,
-      '  "headers": { "Authorization": "Bearer <VWA_MCP_TOKEN>" }',
-      "}",
-      "",
-      "配置完成后请验证：调用 tools/list 应返回上述工具列表。",
-    ].join("\n");
-  }
-  return [
-    "Install the Video Work API MCP server (speech generation / subtitle extraction tools).",
-    "",
-    "- Transport: HTTP (POST, JSON-RPC 2.0)",
-    `- Endpoint: ${url}`,
-    "- Auth: header `Authorization: Bearer <VWA_MCP_TOKEN>` (ask me for the token; do not guess or leave it empty)",
-    "",
-    "Available tools: get_status, list_speakers, create_speaker, delete_speaker, rename_speaker, add_voice_profile, delete_voice_profile, rename_voice_profile, generate_speech, get_generation, extract_video_subtitles.",
-    "",
-    "Claude Code install command:",
-    `claude mcp add --transport http video-work-api ${url} --header "Authorization: Bearer <VWA_MCP_TOKEN>"`,
-    "",
-    'opencode config (the "mcp" section of opencode.json):',
-    '"video-work-api": {',
-    '  "type": "remote",',
-    `  "url": "${url}",`,
-    '  "headers": { "Authorization": "Bearer <VWA_MCP_TOKEN>" }',
-    "}",
-    "",
-    "After configuring, verify by calling tools/list — it should return the tools above.",
-  ].join("\n");
-}
-
 async function copyTextToClipboard(text) {
   if (navigator.clipboard && window.isSecureContext) {
     try {
@@ -1786,20 +1759,68 @@ const copyAgentPromptButton = $("#copyAgentPrompt");
 if (copyAgentPromptButton) {
   let resetTimer = null;
   copyAgentPromptButton.addEventListener("click", async () => {
-    const promptText = buildAgentPrompt();
-    const ok = await copyTextToClipboard(promptText);
-    if (!ok) {
-      window.prompt(t("agentPromptCopyFailed"), promptText);
-      return;
-    }
-    copyAgentPromptButton.textContent = t("agentPromptCopied");
-    copyAgentPromptButton.disabled = true;
-    if (resetTimer) clearTimeout(resetTimer);
-    resetTimer = setTimeout(() => {
-      copyAgentPromptButton.textContent = t("copyAgentPrompt");
+    const attempt = agentPromptAccess.begin();
+    if (!attempt) return;
+    let promptText = null;
+    let receivedToken = null;
+    let token = null;
+    try {
+      copyAgentPromptButton.disabled = true;
+      const response = await api("/api/auth/mcp-token", {
+        method: "POST",
+        body: "{}",
+        signal: attempt.signal,
+      });
+      receivedToken = response.token;
+      response.token = null;
+      if (!agentPromptAccess.storeToken(attempt.id, receivedToken)) {
+        receivedToken = null;
+        return;
+      }
+      receivedToken = null;
+      if (!agentPromptAccess.isCurrent(attempt.id)) return;
+      token = agentPromptAccess.takeToken(attempt.id);
+      if (!token || !agentPromptAccess.isCurrent(attempt.id)) return;
+      promptText = window.AgentPrompt.buildAgentPrompt(
+        language,
+        `${window.location.origin}/mcp`,
+        token,
+      );
+      token = null;
+      if (!agentPromptAccess.isCurrent(attempt.id)) return;
+      const ok = await copyTextToClipboard(promptText);
+      if (!agentPromptAccess.isCurrent(attempt.id)) return;
+      if (!ok) {
+        if (!agentPromptAccess.isCurrent(attempt.id)) return;
+        window.prompt(t("agentPromptCopyFailed"), promptText);
+      }
+      if (!agentPromptAccess.isCurrent(attempt.id)) return;
+      copyAgentPromptButton.textContent = ok
+        ? t("agentPromptCopied")
+        : t("copyAgentPrompt");
+      if (resetTimer) clearTimeout(resetTimer);
+      const feedbackEpoch = attempt.id;
+      resetTimer = setTimeout(() => {
+        if (agentPromptAccess.currentEpoch() !== feedbackEpoch) return;
+        copyAgentPromptButton.textContent = t("copyAgentPrompt");
+        copyAgentPromptButton.disabled = false;
+        resetTimer = null;
+      }, 1600);
+    } catch (error) {
+      if (!agentPromptAccess.isCurrent(attempt.id) || error.name === "AbortError") {
+        return;
+      }
+      if (error.code === "mcp_not_configured") {
+        setAgentPromptAvailable(false);
+      }
+      notice(error.message);
       copyAgentPromptButton.disabled = false;
-      resetTimer = null;
-    }, 1600);
+    } finally {
+      receivedToken = null;
+      token = null;
+      promptText = null;
+      agentPromptAccess.finish(attempt.id);
+    }
   });
 }
 
