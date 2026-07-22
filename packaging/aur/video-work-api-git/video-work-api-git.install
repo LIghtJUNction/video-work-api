@@ -46,6 +46,11 @@ _ensure_user_and_dirs() {
   fi
 }
 
+_ensure_mcp_token() {
+  # The wrapper loads the packaged config and re-executes as the service user.
+  /usr/bin/vwactl mcp-token ensure
+}
+
 _print_banner() {
   local mode="$1"
   echo "-------------------------------------------------------------------"
@@ -58,8 +63,8 @@ _print_banner() {
     echo "  sudo vwactl init           # DB + one-time setup token"
     echo "  sudo vwactl model download # via hf CLI + Hub cache (opt-in, multi-GB)"
     echo ""
-    echo "Optional MCP token in $_CONF_DIR/config.env:"
-    echo "  VWA_MCP_TOKEN=\$(openssl rand -hex 32)"
+    echo "MCP authentication: a persistent private token was created automatically."
+    echo "After admin login, use 'Copy agent prompt' to configure Codex."
     echo ""
     echo "Start (manual only; package never enables the unit):"
     echo "  sudo systemctl start video-work-api.service"
@@ -73,6 +78,7 @@ _print_banner() {
     ;;
   upgrade)
     echo "video-work-api-git upgraded."
+    echo "Persistent MCP authentication token ensured (value not printed)."
     echo ""
     echo "If Python deps changed, rebuild the service venv:"
     echo "  sudo vwactl setup"
@@ -89,6 +95,7 @@ _print_banner() {
 post_install() {
   _ensure_root
   _ensure_user_and_dirs
+  _ensure_mcp_token
   systemctl daemon-reload || true
   _print_banner install
 }
@@ -96,6 +103,7 @@ post_install() {
 post_upgrade() {
   _ensure_root
   _ensure_user_and_dirs
+  _ensure_mcp_token
   systemctl daemon-reload || true
   _print_banner upgrade
 }

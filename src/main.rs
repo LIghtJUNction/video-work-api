@@ -13,7 +13,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use rand::RngCore;
 use tracing_subscriber::EnvFilter;
-use video_work_api::config::Settings;
+use video_work_api::config::{McpTokenSource, Settings};
 use video_work_api::database::Database;
 use video_work_api::engine::{CosyVoiceEngine, SpeechEngine};
 use video_work_api::http::{build_router, AppState, LoginLimiter};
@@ -32,7 +32,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Create data dirs and one-time setup token (prints the token)
+    /// Create data dirs, persistent MCP token, and one-time web setup token
     Init {
         /// Print only the token value (no labels; good for piping)
         #[arg(long)]
@@ -48,6 +48,11 @@ enum Commands {
         /// Print only the token value (no labels; good for piping)
         #[arg(long, global = true)]
         raw: bool,
+    },
+    /// Manage the persistent MCP bearer token (never prints its value)
+    McpToken {
+        #[command(subcommand)]
+        command: McpTokenCommands,
     },
     /// Create Python venv for CosyVoice/FunClip vendor dependencies
     Setup,
@@ -90,6 +95,14 @@ enum TokenCommands {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum McpTokenCommands {
+    /// Create the persistent MCP token if it is absent
+    Ensure,
+    /// Atomically replace the persistent MCP token
+    Rotate,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<OsString> = env::args_os().collect();
@@ -100,13 +113,20 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse_from(args);
-    let settings = Settings::from_env()?;
+    let mut settings = Settings::from_env()?;
 
     match cli.command {
-        Commands::Init { raw, rotate } => cmd_token_ensure(&settings, raw, rotate),
+        Commands::Init { raw, rotate } => {
+            ensure_runtime_mcp_token(&mut settings)?;
+            cmd_token_ensure(&settings, raw, rotate)
+        }
         Commands::Token { command, raw } => match command.unwrap_or(TokenCommands::Show) {
             TokenCommands::Show => cmd_token_show(&settings, raw, /*create_if_missing*/ true),
             TokenCommands::Create { rotate } => cmd_token_ensure(&settings, raw, rotate),
+        },
+        Commands::McpToken { command } => match command {
+            McpTokenCommands::Ensure => cmd_mcp_token_ensure(&mut settings),
+            McpTokenCommands::Rotate => cmd_mcp_token_rotate(&mut settings),
         },
         Commands::Setup => cmd_setup(&settings),
         Commands::Model {
@@ -121,10 +141,50 @@ async fn main() -> Result<()> {
             confirm_rights,
         } => cmd_import(&settings, &path, confirm_rights),
         Commands::Passwd => cmd_passwd(&settings),
-        Commands::Status => cmd_status(&settings),
-        Commands::Paths => cmd_paths(&settings),
+        Commands::Status => cmd_status(&mut settings),
+        Commands::Paths => cmd_paths(&mut settings),
         Commands::Serve => cmd_serve(settings).await,
     }
+}
+
+fn ensure_runtime_mcp_token(settings: &mut Settings) -> Result<()> {
+    if settings.mcp_token_source == Some(McpTokenSource::Environment) {
+        return Ok(());
+    }
+    settings.load_mcp_token()?;
+    if settings.mcp_token.is_some() {
+        return Ok(());
+    }
+    let token = video_work_api::mcp_token::ensure(&settings.mcp_token_file)?;
+    settings.mcp_token = Some(token);
+    settings.mcp_token_source = Some(McpTokenSource::File);
+    Ok(())
+}
+
+fn cmd_mcp_token_ensure(settings: &mut Settings) -> Result<()> {
+    ensure_runtime_mcp_token(settings)?;
+    println!(
+        "MCP token ready (source: {}). Value was not printed.",
+        settings
+            .mcp_token_source
+            .map(McpTokenSource::label)
+            .unwrap_or("unset")
+    );
+    Ok(())
+}
+
+fn cmd_mcp_token_rotate(settings: &mut Settings) -> Result<()> {
+    if settings.mcp_token_source == Some(McpTokenSource::Environment) {
+        bail!("VWA_MCP_TOKEN override is active; remove it before rotating the token file");
+    }
+    let token = video_work_api::mcp_token::rotate(&settings.mcp_token_file)?;
+    settings.mcp_token = Some(token);
+    settings.mcp_token_source = Some(McpTokenSource::File);
+    println!("MCP token rotated. Value was not printed.");
+    println!("Next: restart the service, sign in as administrator, and copy the NEW agent prompt.");
+    println!("Rerun the chosen project/global install branch to replace the static token.");
+    println!("Then restart/open a new Codex session and verify the live MCP tools.");
+    Ok(())
 }
 
 fn reject_passwd_arguments(args: &[OsString]) -> Result<()> {
@@ -428,7 +488,8 @@ fn cmd_import(settings: &Settings, path: &Path, confirm_rights: bool) -> Result<
     Ok(())
 }
 
-fn cmd_status(settings: &Settings) -> Result<()> {
+fn cmd_status(settings: &mut Settings) -> Result<()> {
+    settings.load_mcp_token()?;
     let configured = if settings.database_path().is_file() {
         Database::open(settings.database_path())?.configured()?
     } else {
@@ -497,11 +558,10 @@ fn cmd_status(settings: &Settings) -> Result<()> {
     );
     println!(
         "mcp: {}",
-        if settings.mcp_token.is_some() {
-            "configured"
-        } else {
-            "unset"
-        }
+        settings
+            .mcp_token_source
+            .map(|source| format!("configured ({})", source.label()))
+            .unwrap_or_else(|| "unset".into())
     );
     println!("listen: {}:{}", settings.host, settings.port);
     Ok(())
@@ -525,7 +585,8 @@ fn resolve_python(settings: &Settings) -> Option<PathBuf> {
     None
 }
 
-fn cmd_paths(settings: &Settings) -> Result<()> {
+fn cmd_paths(settings: &mut Settings) -> Result<()> {
+    settings.load_mcp_token()?;
     let pairs = [
         ("data", settings.data_dir.display().to_string()),
         ("database", settings.database_path().display().to_string()),
@@ -575,16 +636,15 @@ fn cmd_paths(settings: &Settings) -> Result<()> {
     );
     println!(
         "mcp_token: {}",
-        if settings.mcp_token.is_some() {
-            "configured"
-        } else {
-            "unset"
-        }
+        settings
+            .mcp_token_source
+            .map(|source| format!("configured ({})", source.label()))
+            .unwrap_or_else(|| "unset".into())
     );
     Ok(())
 }
 
-async fn cmd_serve(settings: Settings) -> Result<()> {
+async fn cmd_serve(mut settings: Settings) -> Result<()> {
     if settings.ssl_certfile.is_some() != settings.ssl_keyfile.is_some() {
         eprintln!("VWA_SSL_CERTFILE and VWA_SSL_KEYFILE must be configured together");
         std::process::exit(2);
@@ -612,6 +672,7 @@ async fn cmd_serve(settings: Settings) -> Result<()> {
     }
 
     settings.create_data_dirs()?;
+    ensure_runtime_mcp_token(&mut settings)?;
     let venv_python = settings.data_dir.join(".venv/bin/python");
     if venv_python.is_file() && std::env::var_os("VWA_PYTHON").is_none() {
         std::env::set_var("VWA_PYTHON", &venv_python);

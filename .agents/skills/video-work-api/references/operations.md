@@ -15,12 +15,11 @@ cargo build --release
 ./scripts/vwactl setup
 ./scripts/vwactl init
 ./scripts/vwactl model download
-# optional: export VWA_MCP_TOKEN=...
 ./scripts/vwactl serve
 ```
 
 In a packaged install, run administrative commands through `sudo vwactl`. The
-wrapper re-executes setup, init, model, import, passwd, status, and paths as the dedicated
+wrapper re-executes setup, init, mcp-token, model, import, passwd, status, and paths as the dedicated
 service account. Do not bypass that wrapper or create root-owned files in
 `/var/lib/video-work-api`.
 
@@ -58,6 +57,16 @@ locations with `vwactl paths` and configuration readiness with `vwactl status`.
 
 Environment variables use the `VWA_*` prefix. See `config.env.example`.
 
+`vwactl init` and `vwactl serve` create `$VWA_DATA_DIR/mcp-token` once with
+mode 0600 when `VWA_MCP_TOKEN` is absent. The token persists across restarts and
+upgrades and is never printed. `VWA_MCP_TOKEN_FILE` overrides its path;
+`VWA_MCP_TOKEN` remains the highest-priority compatibility override. Use
+`vwactl mcp-token ensure` to provision it explicitly and `vwactl mcp-token
+rotate` for intentional rotation. After rotation, restart the service, sign in
+as administrator, copy the new agent prompt, rerun the same project/global
+installation branch to replace the client's static token, then restart/open a
+new Codex session and verify live tools. Restarting alone is insufficient.
+
 ## Reference audio
 
 Use clean speech without music, effects, overlap, clipping, or long silence.
@@ -86,9 +95,13 @@ Default FunClip root is `vendor/FunClip` when present; override with
 
 ## MCP for AI agents
 
-Set `VWA_MCP_TOKEN` to a long random secret. Clients POST JSON-RPC to
-`http://HOST:PORT/mcp` with `Authorization: Bearer <token>`. Put agent-readable
-reference audio under `VWA_REFERENCE_INPUT_DIR` for `add_voice_profile`.
+Clients POST JSON-RPC to `http://HOST:PORT/mcp` with `Authorization: Bearer
+<token>`. After administrator login, **Copy agent prompt** returns a Codex-first
+prompt containing the active token. It asks once whether to install into the
+current trusted project's `.codex/config.toml` or global
+`~/.codex/config.toml`, then verifies the live MCP connection. Put
+agent-readable reference audio under `VWA_REFERENCE_INPUT_DIR` for
+`add_voice_profile`.
 
 ## systemd
 

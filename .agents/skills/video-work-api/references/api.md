@@ -11,7 +11,7 @@ never log or persist its plaintext value.
   `mcp`, and `funclip_ready`.
 - `POST /api/setup` accepts `token` and `password`; available once.
 - `POST /api/auth/login` accepts `password`; `POST /api/auth/logout` signs out.
-- `POST /api/auth/mcp-token` returns the configured MCP token only to an
+- `POST /api/auth/mcp-token` returns the active env-override or persistent-file MCP token only to an
   authenticated, same-origin admin session. The response is never cacheable.
 - `GET /api/auth/passkeys` lists public passkey metadata for the signed-in admin.
 - `POST /api/auth/passkeys/register/start` accepts `{name}` and
