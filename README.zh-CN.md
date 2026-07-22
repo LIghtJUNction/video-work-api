@@ -208,7 +208,10 @@ Token 默认保存在 `$VWA_DATA_DIR/mcp-token`，重启和升级后保持不变
 配置变量使用 `VWA_*` 前缀。常用设置包括 `VWA_DATA_DIR`、`VWA_MODEL_DIR`、
 `VWA_COSYVOICE_ROOT`、`VWA_FUNCLIP_ROOT`、`VWA_HOST`、`VWA_PORT`、
 `VWA_VIDEO_INPUT_DIR`、`VWA_REFERENCE_INPUT_DIR`、`VWA_MCP_TOKEN_FILE`，
-以及可选的 `VWA_SSL_CERTFILE` / `VWA_SSL_KEYFILE`。权威默认值请查看
+以及可选的 `VWA_SSL_CERTFILE` / `VWA_SSL_KEYFILE`。证书和密钥路径只会按成对、
+常规非符号链接文件进行校验，并不会启用内置 HTTPS；服务仍通过 HTTP 提供。
+如需非 localhost 或局域网浏览器安全上下文，请使用 HTTPS 反向代理。
+权威默认值请查看
 [`config.env.example`](config.env.example)。
 
 软件包安装路径：

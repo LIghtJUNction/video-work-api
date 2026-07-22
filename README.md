@@ -223,6 +223,9 @@ Configuration uses the `VWA_*` prefix. Common settings include
 `VWA_DATA_DIR`, `VWA_MODEL_DIR`, `VWA_COSYVOICE_ROOT`, `VWA_FUNCLIP_ROOT`,
 `VWA_HOST`, `VWA_PORT`, `VWA_VIDEO_INPUT_DIR`, `VWA_REFERENCE_INPUT_DIR`,
 `VWA_MCP_TOKEN_FILE`, and optional `VWA_SSL_CERTFILE` / `VWA_SSL_KEYFILE`.
+The certificate and key paths are validated together as regular, non-symlink
+files, but they do not enable built-in HTTPS; the service still serves HTTP.
+Use an HTTPS reverse proxy for secure non-localhost or LAN browser contexts.
 See [`config.env.example`](config.env.example) for the authoritative defaults.
 
 Packaged paths:
