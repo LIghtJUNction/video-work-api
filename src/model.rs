@@ -70,8 +70,9 @@ fn which_bin(name: &str) -> Option<PathBuf> {
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ModelDownloadState {
+    #[default]
     Idle,
     Running,
     Succeeded,
@@ -92,12 +93,6 @@ impl ModelDownloadState {
 #[derive(Debug, Default)]
 pub struct ModelDownloadManager {
     state: Mutex<ModelDownloadState>,
-}
-
-impl Default for ModelDownloadState {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 impl ModelDownloadManager {

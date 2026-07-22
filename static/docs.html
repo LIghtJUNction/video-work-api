@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <script>try{document.documentElement.dataset.theme=localStorage.getItem("vwa-theme")||"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
   <title>API Docs · Video Work API</title>
-  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260721d">
   <link rel="stylesheet" href="/static/styles.css?v=20260721">
   <script src="/static/theme.js?v=20260721" defer></script>
 </head>
 <body class="docs-page">
   <header class="site-header">
     <a class="brand" href="/" aria-label="Video Work API">
-      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8.1 3 C 8 1.9, 12 1.8, 11.9 3.1 L 11.8 7.4 C 11.8 9.2, 8.2 9.3, 8.1 7.5 Z"/><path d="M5.6 7.8 C 5.5 12.2, 14.5 12.3, 14.4 7.9"/><path d="M10 12.4 L 10 15.1"/><path d="M7.4 15.9 L 12.6 15.7"/></svg></span>
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8.4 4.1 C 8.2 2.8, 12 2.7, 11.9 4.3 L 11.8 7.6 C 11.9 9.2, 8.3 9.3, 8.4 7.8 Z"/><path d="M6.3 8 C 6.1 11.9, 14 12.1, 13.8 8.2"/><path d="M10.1 12.1 L 10.1 14.5"/><path d="M7.9 15.2 L 12.4 15"/><circle cx="15" cy="5" r="1.3" fill="currentColor" stroke="none"/></svg></span>
       <span>
         <span class="eyebrow">VIDEO WORK API</span>
         <strong data-i18n="title">视频工作 API</strong>
@@ -158,6 +158,12 @@
           <span><code>/api/videos/subtitles</code></span>
           <span data-i18n="authSession">会话</span>
           <span data-i18n="descSubtitles">JSON <code>{video_path}</code> 相对于 <code>VWA_VIDEO_INPUT_DIR</code>；返回 <code>{segments, srt}</code>。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/videos/subtitles/upload</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descSubtitlesUpload">multipart 字段 video（≤2 GB，常见视频格式）；提取后删除临时文件，返回 {segments, srt}。</span>
         </div>
       </div>
     </section>
@@ -307,6 +313,8 @@
         descGenerate: "JSON {speaker_id, profile_id, target_text, speed}；speed 0.75–1.25；文案 ≤ 1200 字符。",
         descAudio: "返回 WAV 音频。",
         descSubtitles: "JSON {video_path} 相对于 VWA_VIDEO_INPUT_DIR；返回 {segments, srt}。",
+        descSubtitlesUpload:
+          "multipart 字段 video（≤2 GB，常见视频格式）；提取后删除临时文件，返回 {segments, srt}。",
         mcpIntro: "端点 POST /mcp。JSON-RPC 2.0 方法：initialize、notifications/initialized、tools/list、tools/call。",
         toolStatus: "服务 / 模型 / FunClip 状态",
         toolList: "说话人与 profiles",
@@ -364,6 +372,8 @@
         descGenerate: "JSON {speaker_id, profile_id, target_text, speed}; speed 0.75–1.25; text ≤ 1200 chars.",
         descAudio: "Authenticated WAV response.",
         descSubtitles: "JSON {video_path} under VWA_VIDEO_INPUT_DIR; returns {segments, srt}.",
+        descSubtitlesUpload:
+          "multipart field video (≤2 GB, common video formats); the temp file is deleted after extraction; returns {segments, srt}.",
         mcpIntro: "Endpoint POST /mcp. JSON-RPC 2.0: initialize, notifications/initialized, tools/list, tools/call.",
         toolStatus: "Service / model / FunClip status",
         toolList: "Speakers and profiles",

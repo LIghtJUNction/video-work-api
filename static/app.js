@@ -6,6 +6,9 @@ const translations = {
     workspaceLead: "导入有明确授权的参考音频，保存精确逐字稿，然后生成自然、稳定的语音。",
     endpointLabel: "MCP SERVER",
     mcpHint: "MCP 服务器运行在此端点，使用 Bearer Token 认证。",
+    copyAgentPrompt: "复制 Agent 提示词",
+    agentPromptCopied: "已复制 ✓",
+    agentPromptCopyFailed: "复制失败，请手动复制",
     logout: "退出",
     docs: "文档",
     downloadModel: "下载模型",
@@ -38,13 +41,26 @@ const translations = {
     addSpeaker: "添加说话人",
     generateEyebrow: "GENERATE",
     generateTitle: "生成语音",
-    generateLead: "选择音色，输入文案，马上试听结果。",
+    generateLead: "每个非空行生成一个独立 WAV，最多 50 条。",
     voiceStyle: "说话人 / 语气",
-    targetText: "目标文案",
+    targetText: "目标文案（每个非空行一条）",
     speed: "语速",
     generateButton: "生成音频",
     download: "下载 WAV",
     resultReady: "生成完成",
+    itemCount: "{count} 条 · 共 {chars} 字符",
+    generateItems: "生成 {count} 条",
+    emptyGeneration: "请至少输入一条非空文案。",
+    tooManyItems: "一次最多处理 50 条。",
+    textTooLong: "第 {index} 条超过 1200 字符（当前 {chars}）。",
+    batchProgress: "完成 {done} / {total} · 失败 {failed}",
+    pending: "等待中",
+    running: "处理中",
+    complete: "已完成",
+    failedStatus: "失败",
+    retryItem: "重试此项",
+    retryFailures: "重试失败项（{count}）",
+    itemPreview: "文案",
     deleteSpeaker: "删除说话人",
     renameSpeaker: "重命名",
     addProfile: "添加参考音频",
@@ -71,12 +87,24 @@ const translations = {
     alreadyConfigured: "已完成首次设置，请使用密码登录。",
     subtitlesEyebrow: "SUBTITLES",
     subtitlesTitle: "视频字幕提取",
-    subtitlesLead: "输入 videos 目录中的视频文件名，提取带时间码的字幕。",
-    videoPath: "视频文件名",
+    subtitlesLead: "可合并目录文件名和本地上传，按顺序提取字幕。",
+    videoPath: "视频文件名（每个非空行一项）",
+    videoUpload: "也可上传视频文件（每个 ≤2 GB）",
+    videoPathOrFileRequired: "请输入文件名或选择视频文件。",
+    chooseVideo: "选择视频",
+    noFileChosen: "未选择文件",
+    filesChosen: "已选 {count} 个：{names}",
+    clear: "清空",
+    clearFiles: "清空已选文件",
+    subtitleItemCount: "共 {count} 项（路径 {paths} · 上传 {files}）",
+    extractSubtitleItems: "提取 {count} 项字幕",
+    fileTooLarge: "文件“{name}”超过 2 GB。",
+    pathTooLong: "第 {index} 个路径超过 500 字符（当前 {chars}）。",
     subtitlesHint: "首次提取会下载 ASR 模型，长视频可能需要几分钟。",
     extractSubtitles: "提取字幕",
     downloadSrt: "下载 SRT",
     subtitlesEmpty: "未识别到字幕片段。",
+    subtitlePreview: "字幕片段预览",
   },
   en: {
     title: "Video Work API",
@@ -85,6 +113,9 @@ const translations = {
     workspaceLead: "Import an explicitly authorized reference, keep its exact transcript, and generate natural, consistent speech.",
     endpointLabel: "MCP SERVER",
     mcpHint: "The MCP server runs at this endpoint with Bearer Token authentication.",
+    copyAgentPrompt: "Copy agent prompt",
+    agentPromptCopied: "Copied ✓",
+    agentPromptCopyFailed: "Copy failed — please copy manually",
     logout: "Sign out",
     docs: "Docs",
     downloadModel: "Download model",
@@ -118,13 +149,26 @@ const translations = {
     addSpeaker: "Add speaker",
     generateEyebrow: "GENERATE",
     generateTitle: "Generate speech",
-    generateLead: "Choose a voice, write your copy, and preview the result.",
+    generateLead: "Each non-empty line creates a separate WAV, up to 50 items.",
     voiceStyle: "Speaker / style",
-    targetText: "Target text",
+    targetText: "Target text (one non-empty line per item)",
     speed: "Speed",
     generateButton: "Generate audio",
     download: "Download WAV",
     resultReady: "Generation complete",
+    itemCount: "{count} items · {chars} characters total",
+    generateItems: "Generate {count} items",
+    emptyGeneration: "Enter at least one non-empty line.",
+    tooManyItems: "A batch can contain at most 50 items.",
+    textTooLong: "Item {index} exceeds 1,200 characters ({chars}).",
+    batchProgress: "Completed {done} / {total} · Failed {failed}",
+    pending: "Pending",
+    running: "Running",
+    complete: "Complete",
+    failedStatus: "Failed",
+    retryItem: "Retry item",
+    retryFailures: "Retry failed ({count})",
+    itemPreview: "Copy",
     deleteSpeaker: "Delete speaker",
     renameSpeaker: "Rename",
     addProfile: "Add reference audio",
@@ -151,12 +195,24 @@ const translations = {
     alreadyConfigured: "Setup is already complete. Please sign in with your password.",
     subtitlesEyebrow: "SUBTITLES",
     subtitlesTitle: "Video Subtitles",
-    subtitlesLead: "Enter a filename from the videos directory to extract time-coded subtitles.",
-    videoPath: "Video filename",
+    subtitlesLead: "Combine filenames from the videos directory with local uploads and process them in order.",
+    videoPath: "Video filenames (one non-empty line per item)",
+    videoUpload: "You can also upload videos (≤2 GB each)",
+    videoPathOrFileRequired: "Enter a filename or choose a video file.",
+    chooseVideo: "Choose video",
+    noFileChosen: "No file chosen",
+    filesChosen: "{count} selected: {names}",
+    clear: "Clear",
+    clearFiles: "Clear selected files",
+    subtitleItemCount: "{count} total ({paths} paths · {files} uploads)",
+    extractSubtitleItems: "Extract {count} subtitle items",
+    fileTooLarge: "“{name}” exceeds 2 GB.",
+    pathTooLong: "Path {index} exceeds 500 characters ({chars}).",
     subtitlesHint: "The first extraction downloads the ASR model; long videos may take a few minutes.",
     extractSubtitles: "Extract subtitles",
     downloadSrt: "Download SRT",
     subtitlesEmpty: "No subtitle segments detected.",
+    subtitlePreview: "Subtitle segment preview",
   },
 };
 
@@ -191,11 +247,37 @@ let state = { speakers: [], passkeys: [] };
 const recorders = new WeakMap();
 const liveStreams = new Set();
 let modelDownloadPoll = null;
+let generationRunning = false;
+let subtitleRunning = false;
+let generationJobs = [];
+let subtitleJobs = [];
+let generationEpoch = 0;
+let subtitleEpoch = 0;
+let logoutInProgress = false;
+
+const {
+  characterCount,
+  parseNonEmptyLines,
+  validateItems,
+  runSequential,
+} = window.BatchCore;
 
 const $ = (selector) => document.querySelector(selector);
 
 function t(key) {
   return translations[language][key] || recordTranslations[language][key] || key;
+}
+
+function tf(key, values = {}) {
+  return Object.entries(values).reduce(
+    (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
+    t(key),
+  );
+}
+
+function shortPreview(value, limit = 72) {
+  const chars = Array.from(String(value || "").replace(/\s+/g, " ").trim());
+  return chars.length <= limit ? chars.join("") : `${chars.slice(0, limit).join("")}…`;
 }
 
 /** FNV-1a over UTF-8 → 4 lowercase hex digits (matches Rust short_hash4). */
@@ -237,6 +319,9 @@ function translate() {
   document.querySelectorAll("[data-i18n]").forEach((node) => {
     node.textContent = t(node.dataset.i18n);
   });
+  document.querySelectorAll("[data-i18n-aria-label]").forEach((node) => {
+    node.setAttribute("aria-label", t(node.dataset.i18nAriaLabel));
+  });
   const languageButton = $("#language");
   if (languageButton) {
     languageButton.textContent = language === "zh" ? "English" : "中文";
@@ -245,6 +330,10 @@ function translate() {
   if (passkeyLoginSupport) {
     passkeyLoginSupport.textContent = passkeyUnsupportedMessage();
   }
+  syncGenerationInput();
+  syncSubtitleInput();
+  localizeGenerationJobsInPlace();
+  localizeSubtitleJobsInPlace();
 }
 
 function notice(message) {
@@ -1063,13 +1152,23 @@ if (passkeyForm) {
 const logoutButton = $("#logout");
 if (logoutButton) {
   logoutButton.onclick = async () => {
+    if (logoutInProgress) return;
+    logoutInProgress = true;
+    logoutButton.disabled = true;
+    clearBatchState(false);
     try {
       await api("/api/auth/logout", { method: "POST", body: "{}" });
+      clearBatchState(false);
       stopModelDownloadPolling();
       await boot();
+      clearBatchState(true);
       notice("");
     } catch (error) {
+      clearBatchState(true);
       notice(error.message);
+    } finally {
+      logoutInProgress = false;
+      logoutButton.disabled = false;
     }
   };
 }
@@ -1124,123 +1223,598 @@ if (speed && speedValue) {
   };
 }
 
-const subtitleForm = $("#subtitleForm");if (subtitleForm) {
-  subtitleForm.onsubmit = async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = $("#subtitleButton");
-    const resultBox = $("#subtitleResult");
-    const segmentsBox = $("#subtitleSegments");
-    const download = $("#subtitleDownload");
-    if (!resultBox || !segmentsBox || !download) return;
-    if (button) {
-      button.disabled = true;
-      button.textContent = t("working");
+const MAX_BATCH_ITEMS = 50;
+const MAX_GENERATION_CHARS = 1200;
+const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
+
+function revokeSubtitleUrls(jobs = subtitleJobs) {
+  jobs.forEach((job) => {
+    if (!job.downloadUrl) return;
+    URL.revokeObjectURL(job.downloadUrl);
+    job.downloadUrl = "";
+  });
+}
+
+function clearBatchState(unlock = true) {
+  generationEpoch += 1;
+  subtitleEpoch += 1;
+  revokeSubtitleUrls();
+  generationJobs = [];
+  subtitleJobs = [];
+  generationRunning = false;
+  subtitleRunning = false;
+  setGenerationControlsDisabled(!unlock);
+  setSubtitleControlsDisabled(!unlock);
+  $("#generationJobs")?.replaceChildren();
+  $("#subtitleJobs")?.replaceChildren();
+  updateBatchProgress("generation", generationJobs);
+  updateBatchProgress("subtitle", subtitleJobs);
+}
+
+function statusText(status) {
+  return t(status === "failed" ? "failedStatus" : status);
+}
+
+function localizeGenerationJobsInPlace() {
+  generationJobs.forEach((job) => {
+    if (!job.row || !job.statusNode) return;
+    job.statusNode.textContent = statusText(job.status);
+    const download = job.content?.querySelector("a[download]");
+    if (download) download.textContent = t("download");
+    const retry = job.content?.querySelector(".retry-item");
+    if (retry) retry.textContent = t("retryItem");
+  });
+  updateBatchProgress("generation", generationJobs);
+}
+
+function localizeSubtitleJobsInPlace() {
+  subtitleJobs.forEach((job) => {
+    if (!job.row || !job.statusNode) return;
+    job.statusNode.textContent = statusText(job.status);
+    const download = job.content?.querySelector("a[download]");
+    if (download) download.textContent = t("downloadSrt");
+    const retry = job.content?.querySelector(".retry-item");
+    if (retry) retry.textContent = t("retryItem");
+    const summary = job.content?.querySelector("details > summary");
+    if (summary) {
+      summary.textContent = `${t("subtitlePreview")} (${job.result?.segments?.length || 0})`;
     }
-    notice("");
-    try {
-      const data = await api("/api/videos/subtitles", {
-        method: "POST",
-        body: JSON.stringify(Object.fromEntries(new FormData(form))),
-      });
-      const segments = Array.isArray(data?.segments) ? data.segments : [];
-      segmentsBox.textContent = "";
-      if (!segments.length) {
-        const empty = document.createElement("p");
-        empty.className = "hint segment-empty";
-        empty.textContent = t("subtitlesEmpty");
-        segmentsBox.appendChild(empty);
-      } else {
-        for (const seg of segments) {
-          const row = document.createElement("div");
-          row.className = "segment";
-          const time = document.createElement("span");
-          time.className = "segment-time";
-          time.textContent = `${seg.start} → ${seg.end}`;
-          const text = document.createElement("span");
-          text.className = "segment-text";
-          text.textContent = seg.text || "";
-          row.append(time, text);
-          segmentsBox.appendChild(row);
-        }
-      }
-      if (data?.srt) {
-        if (download.dataset.url) URL.revokeObjectURL(download.dataset.url);
-        const url = URL.createObjectURL(
-          new Blob([data.srt], { type: "application/x-subrip" }),
-        );
-        download.dataset.url = url;
-        download.href = url;
-        const raw = String(new FormData(form).get("video_path") || "subtitles");
-        const base =
-          raw.replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "_") || "subtitles";
-        download.download = `${base}.srt`;
-        download.classList.remove("hidden");
-      } else {
-        download.classList.add("hidden");
-      }
-      resultBox.classList.remove("hidden");
-    } catch (error) {
-      resultBox.classList.add("hidden");
-      notice(error.message);
-    } finally {
-      if (button) {
-        button.disabled = false;
-        button.textContent = t("extractSubtitles");
-      }
-    }
+    const empty = job.content?.querySelector(".segment-empty");
+    if (empty) empty.textContent = t("subtitlesEmpty");
+  });
+  updateBatchProgress("subtitle", subtitleJobs);
+}
+
+function batchCounts(jobs) {
+  return {
+    done: jobs.filter((job) => job.status === "complete" || job.status === "failed").length,
+    failed: jobs.filter((job) => job.status === "failed").length,
   };
 }
+
+function updateBatchProgress(kind, jobs) {
+  const prefix = kind === "generation" ? "generation" : "subtitle";
+  const box = $(`#${prefix}Batch`);
+  const progress = $(`#${prefix}Progress`);
+  const text = $(`#${prefix}ProgressText`);
+  const retry = $(`#retry${kind === "generation" ? "Generation" : "Subtitle"}Failures`);
+  if (!box || !progress || !text || !retry) return;
+  box.classList.toggle("hidden", jobs.length === 0);
+  const counts = batchCounts(jobs);
+  progress.max = Math.max(jobs.length, 1);
+  progress.value = counts.done;
+  text.textContent = tf("batchProgress", { ...counts, total: jobs.length });
+  retry.textContent = tf("retryFailures", { count: counts.failed });
+  retry.classList.toggle("hidden", counts.failed === 0 || jobs.some((job) => job.status === "running"));
+}
+
+function setGenerationControlsDisabled(disabled) {
+  [$("#profileSelect"), $("#targetText"), $("#speed"), $("#generateButton")].forEach((node) => {
+    if (node) node.disabled = disabled;
+  });
+  document.querySelectorAll("#generationJobs .retry-item").forEach((node) => {
+    node.disabled = disabled;
+  });
+}
+
+function setGenerationLocked(locked) {
+  generationRunning = locked;
+  setGenerationControlsDisabled(locked);
+}
+
+function generationValidation(lines = parseNonEmptyLines($("#targetText")?.value)) {
+  const validation = validateItems(lines, {
+    maxItems: MAX_BATCH_ITEMS,
+    maxChars: MAX_GENERATION_CHARS,
+  });
+  if (!validation) return "";
+  if (validation.type === "empty") return t("emptyGeneration");
+  if (validation.type === "too_many") return t("tooManyItems");
+  return tf("textTooLong", {
+    index: validation.index + 1,
+    chars: validation.count,
+  });
+}
+
+function syncGenerationInput() {
+  const input = $("#targetText");
+  const count = $("#generationCount");
+  const error = $("#generationError");
+  const button = $("#generateButton");
+  if (!input || !count || !error || !button) return;
+  const lines = parseNonEmptyLines(input.value);
+  const chars = lines.reduce((sum, line) => sum + characterCount(line), 0);
+  count.textContent = tf("itemCount", { count: lines.length, chars });
+  const validation = generationValidation(lines);
+  error.textContent = validation;
+  input.setAttribute("aria-invalid", String(Boolean(validation)));
+  button.textContent = tf("generateItems", { count: lines.length });
+}
+
+function updateGenerationJob(job) {
+  if (!job.row) return;
+  job.row.className = `job-row status-${job.status}`;
+  job.statusNode.textContent = statusText(job.status);
+  job.content.replaceChildren();
+  if (job.status === "complete" && job.result?.audio_url) {
+    job.content.className = "job-content generation-output";
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.preload = "none";
+    audio.src = job.result.audio_url;
+    const download = document.createElement("a");
+    download.className = "button secondary compact";
+    download.href = job.result.audio_url;
+    download.download = job.result.download_name || downloadNameFromText(job.text);
+    download.textContent = t("download");
+    job.content.append(audio, download);
+  } else if (job.status === "failed") {
+    job.content.className = "job-content";
+    const error = document.createElement("p");
+    error.className = "job-error";
+    error.textContent = job.error;
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "secondary compact retry-item";
+    retry.textContent = t("retryItem");
+    retry.disabled = generationRunning;
+    retry.onclick = () => runGenerationJobs([job]);
+    job.content.append(error, retry);
+  }
+  updateBatchProgress("generation", generationJobs);
+}
+
+function renderGenerationJobs() {
+  const root = $("#generationJobs");
+  if (!root) return;
+  root.replaceChildren();
+  generationJobs.forEach((job, index) => {
+    const row = document.createElement("article");
+    const head = document.createElement("div");
+    head.className = "job-head";
+    const title = document.createElement("strong");
+    title.textContent = `#${index + 1} · ${shortPreview(job.text)}`;
+    title.title = job.text;
+    const badge = document.createElement("span");
+    badge.className = "job-status";
+    head.append(title, badge);
+    const content = document.createElement("div");
+    row.append(head, content);
+    job.row = row;
+    job.statusNode = badge;
+    job.content = content;
+    root.appendChild(row);
+    updateGenerationJob(job);
+  });
+  updateBatchProgress("generation", generationJobs);
+}
+
+async function runGenerationJobs(jobs) {
+  if (generationRunning || logoutInProgress || !jobs.length) return;
+  const epoch = generationEpoch;
+  setGenerationLocked(true);
+  await runSequential(
+    jobs,
+    (job) =>
+      api("/api/generations", {
+        method: "POST",
+        body: JSON.stringify(job.request),
+      }),
+    updateGenerationJob,
+    () => epoch !== generationEpoch,
+  );
+  if (epoch !== generationEpoch) return;
+  setGenerationLocked(false);
+  syncGenerationInput();
+  updateBatchProgress("generation", generationJobs);
+}
+
+const targetText = $("#targetText");
+if (targetText) targetText.addEventListener("input", syncGenerationInput);
 
 const generateForm = $("#generateForm");
 if (generateForm) {
   generateForm.onsubmit = async (event) => {
     event.preventDefault();
-    const form = event.currentTarget;
-    const profileSelect = $("#profileSelect");
-    if (!profileSelect?.value) {
+    if (generationRunning || logoutInProgress) return;
+    const lines = parseNonEmptyLines($("#targetText")?.value);
+    const error = generationValidation(lines);
+    syncGenerationInput();
+    if (error) return;
+    const profile = $("#profileSelect")?.value;
+    if (!profile) {
       notice(t("failed"));
       return;
     }
-    const [speaker_id, profile_id] = profileSelect.value.split("|");
-    const data = Object.fromEntries(new FormData(form));
-    data.speaker_id = speaker_id;
-    data.profile_id = profile_id;
-    data.speed = Number(data.speed);
-    const button = $("#generateButton");
-    try {
-      if (button) button.disabled = true;
-      notice(t("working"));
-      const result = await api("/api/generations", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-      const player = $("#player");
-      const download = $("#download");
-      const resultBox = $("#result");
-      if (player) player.src = result.audio_url;
-      if (download) {
-        download.href = result.audio_url;
-        // Prefer server-provided 前缀…后缀.wav; fall back to local abbreviate.
-        const name =
-          result.download_name ||
-          downloadNameFromText(String(data.target_text || ""));
-        download.setAttribute("download", name);
-      }
-      if (resultBox) resultBox.classList.remove("hidden");
-      notice("");
-    } catch (error) {
-      notice(error.message);
-    } finally {
-      if (button) button.disabled = false;
-    }
+    const [speaker_id, profile_id] = profile.split("|");
+    const speedSnapshot = Number($("#speed")?.value || 1);
+    generationEpoch += 1;
+    generationJobs = lines.map((text) => ({
+      text,
+      status: "pending",
+      error: "",
+      result: null,
+      request: { speaker_id, profile_id, target_text: text, speed: speedSnapshot },
+    }));
+    renderGenerationJobs();
+    notice("");
+    await runGenerationJobs(generationJobs);
   };
 }
 
+const retryGenerationFailures = $("#retryGenerationFailures");
+if (retryGenerationFailures) {
+  retryGenerationFailures.onclick = () =>
+    runGenerationJobs(generationJobs.filter((job) => job.status === "failed"));
+}
+
+const videoFileInput = $("#videoFileInput");
+const videoFileButton = $("#videoFileButton");
+const videoFileName = $("#videoFileName");
+const videoFileClear = $("#videoFileClear");
+
+function subtitleSources() {
+  return {
+    paths: parseNonEmptyLines($("#videoPaths")?.value),
+    files: Array.from(videoFileInput?.files || []),
+  };
+}
+
+function subtitleValidation(sources = subtitleSources()) {
+  const total = sources.paths.length + sources.files.length;
+  if (!total) return t("videoPathOrFileRequired");
+  if (total > MAX_BATCH_ITEMS) return t("tooManyItems");
+  const pathValidation = sources.paths.length
+    ? validateItems(sources.paths, { maxItems: MAX_BATCH_ITEMS, maxChars: 500 })
+    : null;
+  if (pathValidation?.type === "too_long") {
+    return tf("pathTooLong", {
+      index: pathValidation.index + 1,
+      chars: pathValidation.count,
+    });
+  }
+  const oversized = sources.files.find((file) => file.size > MAX_VIDEO_BYTES);
+  return oversized ? tf("fileTooLarge", { name: oversized.name }) : "";
+}
+
+function syncSubtitleInput() {
+  const { paths, files } = subtitleSources();
+  const summary = $("#videoFileName");
+  const clear = $("#videoFileClear");
+  const count = $("#subtitleCount");
+  const error = $("#subtitleError");
+  const button = $("#subtitleButton");
+  const names = files.slice(0, 3).map((file) => file.name).join(", ");
+  if (summary) {
+    summary.textContent = files.length
+      ? tf("filesChosen", { count: files.length, names: `${names}${files.length > 3 ? "…" : ""}` })
+      : t("noFileChosen");
+    summary.classList.toggle("has-file", files.length > 0);
+  }
+  if (clear) clear.classList.toggle("hidden", files.length === 0);
+  if (count) count.textContent = tf("subtitleItemCount", { count: paths.length + files.length, paths: paths.length, files: files.length });
+  const validation = subtitleValidation({ paths, files });
+  if (error) error.textContent = validation;
+  const pathsInput = $("#videoPaths");
+  if (pathsInput) pathsInput.setAttribute("aria-invalid", String(Boolean(validation)));
+  if (videoFileInput) videoFileInput.setAttribute("aria-invalid", String(Boolean(validation)));
+  if (button) button.textContent = tf("extractSubtitleItems", { count: paths.length + files.length });
+}
+
+function setSubtitleControlsDisabled(disabled) {
+  [$("#videoPaths"), videoFileInput, videoFileButton, videoFileClear, $("#subtitleButton")].forEach((node) => {
+    if (node) node.disabled = disabled;
+  });
+  document.querySelectorAll("#subtitleJobs .retry-item").forEach((node) => {
+    node.disabled = disabled;
+  });
+}
+
+function setSubtitleLocked(locked) {
+  subtitleRunning = locked;
+  setSubtitleControlsDisabled(locked);
+}
+
+function subtitleDownloadName(label) {
+  const base = String(label || "subtitles").replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "_") || "subtitles";
+  return `${base}.srt`;
+}
+
+function appendSegments(root, segments) {
+  if (!segments.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint segment-empty";
+    empty.textContent = t("subtitlesEmpty");
+    root.appendChild(empty);
+    return;
+  }
+  segments.forEach((seg) => {
+    const row = document.createElement("div");
+    row.className = "segment";
+    const time = document.createElement("span");
+    time.className = "segment-time";
+    time.textContent = `${seg.start} → ${seg.end}`;
+    const text = document.createElement("span");
+    text.className = "segment-text";
+    text.textContent = seg.text || "";
+    row.append(time, text);
+    root.appendChild(row);
+  });
+}
+
+function updateSubtitleJob(job) {
+  if (!job.row) return;
+  job.row.className = `job-row status-${job.status}`;
+  job.statusNode.textContent = statusText(job.status);
+  job.content.replaceChildren();
+  if (job.status === "complete") {
+    job.content.className = "job-content subtitle-output";
+    if (job.result?.srt) {
+      if (!job.downloadUrl) {
+        job.downloadUrl = URL.createObjectURL(
+          new Blob([job.result.srt], { type: "application/x-subrip" }),
+        );
+      }
+      const download = document.createElement("a");
+      download.className = "button secondary compact";
+      download.href = job.downloadUrl;
+      download.download = subtitleDownloadName(job.label);
+      download.textContent = t("downloadSrt");
+      job.content.appendChild(download);
+    }
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = `${t("subtitlePreview")} (${job.result?.segments?.length || 0})`;
+    details.appendChild(summary);
+    details.addEventListener("toggle", () => {
+      if (!details.open || details.dataset.materialized) return;
+      const segments = document.createElement("div");
+      segments.className = "segments";
+      appendSegments(
+        segments,
+        Array.isArray(job.result?.segments) ? job.result.segments : [],
+      );
+      details.appendChild(segments);
+      details.dataset.materialized = "true";
+    });
+    job.content.appendChild(details);
+  } else if (job.status === "failed") {
+    job.content.className = "job-content";
+    const error = document.createElement("p");
+    error.className = "job-error";
+    error.textContent = job.error;
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "secondary compact retry-item";
+    retry.textContent = t("retryItem");
+    retry.disabled = subtitleRunning;
+    retry.onclick = () => runSubtitleJobs([job]);
+    job.content.append(error, retry);
+  }
+  updateBatchProgress("subtitle", subtitleJobs);
+}
+
+function renderSubtitleJobs() {
+  const root = $("#subtitleJobs");
+  if (!root) return;
+  root.replaceChildren();
+  subtitleJobs.forEach((job, index) => {
+    const row = document.createElement("article");
+    const head = document.createElement("div");
+    head.className = "job-head";
+    const title = document.createElement("strong");
+    title.textContent = `#${index + 1} · ${shortPreview(job.label)}`;
+    title.title = job.label;
+    const badge = document.createElement("span");
+    badge.className = "job-status";
+    head.append(title, badge);
+    const content = document.createElement("div");
+    row.append(head, content);
+    job.row = row;
+    job.statusNode = badge;
+    job.content = content;
+    root.appendChild(row);
+    updateSubtitleJob(job);
+  });
+  updateBatchProgress("subtitle", subtitleJobs);
+}
+
+async function runSubtitleJobs(jobs) {
+  if (subtitleRunning || logoutInProgress || !jobs.length) return;
+  const epoch = subtitleEpoch;
+  setSubtitleLocked(true);
+  jobs.forEach((job) => {
+    if (job.downloadUrl) {
+      URL.revokeObjectURL(job.downloadUrl);
+      job.downloadUrl = "";
+    }
+  });
+  await runSequential(
+    jobs,
+    async (job) => {
+      if (job.kind === "file") {
+        const body = new FormData();
+        body.append("video", job.file);
+        return api("/api/videos/subtitles/upload", { method: "POST", body });
+      }
+      return api("/api/videos/subtitles", {
+        method: "POST",
+        body: JSON.stringify({ video_path: job.path }),
+      });
+    },
+    updateSubtitleJob,
+    () => epoch !== subtitleEpoch,
+  );
+  if (epoch !== subtitleEpoch) return;
+  setSubtitleLocked(false);
+  syncSubtitleInput();
+  updateBatchProgress("subtitle", subtitleJobs);
+}
+
+if (videoFileInput && videoFileButton && videoFileClear) {
+  videoFileButton.addEventListener("click", () => videoFileInput.click());
+  videoFileInput.addEventListener("change", syncSubtitleInput);
+  videoFileClear.addEventListener("click", () => {
+    videoFileInput.value = "";
+    syncSubtitleInput();
+  });
+}
+const videoPaths = $("#videoPaths");
+if (videoPaths) videoPaths.addEventListener("input", syncSubtitleInput);
+
+const subtitleForm = $("#subtitleForm");
+if (subtitleForm) {
+  subtitleForm.onsubmit = async (event) => {
+    event.preventDefault();
+    if (subtitleRunning || logoutInProgress) return;
+    const sources = subtitleSources();
+    const error = subtitleValidation(sources);
+    syncSubtitleInput();
+    if (error) return;
+    revokeSubtitleUrls();
+    subtitleEpoch += 1;
+    subtitleJobs = [
+      ...sources.paths.map((path) => ({ kind: "path", path, label: path, status: "pending", error: "", result: null })),
+      ...sources.files.map((file) => ({ kind: "file", file, label: file.name, status: "pending", error: "", result: null })),
+    ];
+    renderSubtitleJobs();
+    notice("");
+    await runSubtitleJobs(subtitleJobs);
+  };
+}
+
+const retrySubtitleFailures = $("#retrySubtitleFailures");
+if (retrySubtitleFailures) {
+  retrySubtitleFailures.onclick = () => runSubtitleJobs(subtitleJobs.filter((job) => job.status === "failed"));
+}
+
+function buildAgentPrompt() {
+  const url = `${window.location.origin}/mcp`;
+  if (language === "zh") {
+    return [
+      "请帮我安装 Video Work API 的 MCP 服务器（语音生成 / 字幕提取工具）。",
+      "",
+      "- 传输方式：HTTP（POST，JSON-RPC 2.0）",
+      `- 端点：${url}`,
+      "- 认证：请求头 `Authorization: Bearer <VWA_MCP_TOKEN>`（请向我索取 token，不要猜测或留空）",
+      "",
+      "可用工具：get_status、list_speakers、create_speaker、delete_speaker、rename_speaker、add_voice_profile、delete_voice_profile、rename_voice_profile、generate_speech、get_generation、extract_video_subtitles。",
+      "",
+      "Claude Code 安装命令：",
+      `claude mcp add --transport http video-work-api ${url} --header "Authorization: Bearer <VWA_MCP_TOKEN>"`,
+      "",
+      "opencode 配置（opencode.json 的 mcp 节）：",
+      '"video-work-api": {',
+      '  "type": "remote",',
+      `  "url": "${url}",`,
+      '  "headers": { "Authorization": "Bearer <VWA_MCP_TOKEN>" }',
+      "}",
+      "",
+      "配置完成后请验证：调用 tools/list 应返回上述工具列表。",
+    ].join("\n");
+  }
+  return [
+    "Install the Video Work API MCP server (speech generation / subtitle extraction tools).",
+    "",
+    "- Transport: HTTP (POST, JSON-RPC 2.0)",
+    `- Endpoint: ${url}`,
+    "- Auth: header `Authorization: Bearer <VWA_MCP_TOKEN>` (ask me for the token; do not guess or leave it empty)",
+    "",
+    "Available tools: get_status, list_speakers, create_speaker, delete_speaker, rename_speaker, add_voice_profile, delete_voice_profile, rename_voice_profile, generate_speech, get_generation, extract_video_subtitles.",
+    "",
+    "Claude Code install command:",
+    `claude mcp add --transport http video-work-api ${url} --header "Authorization: Bearer <VWA_MCP_TOKEN>"`,
+    "",
+    'opencode config (the "mcp" section of opencode.json):',
+    '"video-work-api": {',
+    '  "type": "remote",',
+    `  "url": "${url}",`,
+    '  "headers": { "Authorization": "Bearer <VWA_MCP_TOKEN>" }',
+    "}",
+    "",
+    "After configuring, verify by calling tools/list — it should return the tools above.",
+  ].join("\n");
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      /* fall through to legacy path */
+    }
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.top = "-9999px";
+  document.body.appendChild(area);
+  area.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  area.remove();
+  return ok;
+}
+
+const copyAgentPromptButton = $("#copyAgentPrompt");
+if (copyAgentPromptButton) {
+  let resetTimer = null;
+  copyAgentPromptButton.addEventListener("click", async () => {
+    const promptText = buildAgentPrompt();
+    const ok = await copyTextToClipboard(promptText);
+    if (!ok) {
+      window.prompt(t("agentPromptCopyFailed"), promptText);
+      return;
+    }
+    copyAgentPromptButton.textContent = t("agentPromptCopied");
+    copyAgentPromptButton.disabled = true;
+    if (resetTimer) clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => {
+      copyAgentPromptButton.textContent = t("copyAgentPrompt");
+      copyAgentPromptButton.disabled = false;
+      resetTimer = null;
+    }, 1600);
+  });
+}
+
 boot();
-window.addEventListener("beforeunload", () => {
+window.addEventListener("beforeunload", (event) => {
+  if (generationRunning || subtitleRunning) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+window.addEventListener("pagehide", (event) => {
+  if (event.persisted) return;
   stopModelDownloadPolling();
   liveStreams.forEach(stopStream);
+  revokeSubtitleUrls();
 });
 
 const studioLayout = document.querySelector(".studio");

@@ -15,6 +15,21 @@ pub struct SubtitleSegment {
     pub text: String,
 }
 
+pub const MAX_VIDEO_UPLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+pub fn video_extension_allowed(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    matches!(
+        ext.as_deref(),
+        Some(
+            "mp4" | "m4v" | "mov" | "mkv" | "webm" | "avi" | "ts" | "mpg" | "mpeg" | "flv" | "wmv"
+        )
+    )
+}
+
 pub fn parse_srt(content: &str) -> Vec<SubtitleSegment> {
     let time_re = Regex::new(
         r"(?P<start>\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(?P<end>\d{2}:\d{2}:\d{2}[,.]\d{3})",

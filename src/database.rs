@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
 const SCHEMA: &str = r#"
@@ -111,6 +111,26 @@ impl Database {
             "DELETE FROM admin WHERE singleton=1 AND password_hash=?1",
             params![password_hash],
         )?;
+        Ok(())
+    }
+
+    /// Changes the existing administrator password and deletes all web sessions
+    /// in one transaction.
+    ///
+    /// Returns an error when no administrator is configured. This operation
+    /// preserves passkeys, speakers, profiles, generations, and files.
+    pub fn change_admin_password_and_clear_sessions(&self, password_hash: &str) -> Result<()> {
+        let mut conn = self.lock()?;
+        let transaction = conn.transaction()?;
+        let updated = transaction.execute(
+            "UPDATE admin SET password_hash=?1 WHERE singleton=1",
+            params![password_hash],
+        )?;
+        if updated != 1 {
+            bail!("administrator is not configured");
+        }
+        transaction.execute("DELETE FROM sessions", [])?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -581,6 +601,110 @@ mod tests {
         assert!(!db.set_admin("other").unwrap());
         db.create_session("abc").unwrap();
         assert!(db.session_exists("abc").unwrap());
+    }
+
+    #[test]
+    fn password_change_updates_hash_and_clears_all_sessions() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("t.sqlite3")).unwrap();
+        assert!(db.set_admin("old-hash").unwrap());
+        db.create_session("session-one").unwrap();
+        db.create_session("session-two").unwrap();
+
+        db.change_admin_password_and_clear_sessions("new-hash")
+            .unwrap();
+
+        assert_eq!(
+            db.admin_password_hash().unwrap().as_deref(),
+            Some("new-hash")
+        );
+        assert!(!db.session_exists("session-one").unwrap());
+        assert!(!db.session_exists("session-two").unwrap());
+    }
+
+    #[test]
+    fn password_change_rejects_an_unconfigured_database() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("t.sqlite3")).unwrap();
+
+        let error = db
+            .change_admin_password_and_clear_sessions("new-hash")
+            .unwrap_err();
+
+        assert!(error.to_string().contains("not configured"));
+        assert!(!db.configured().unwrap());
+    }
+
+    #[test]
+    fn password_change_preserves_passkeys() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("t.sqlite3")).unwrap();
+        assert!(db.set_admin("old-hash").unwrap());
+        db.insert_passkey("one", "Laptop", "credential", "{\"v\":1}")
+            .unwrap()
+            .unwrap();
+
+        db.change_admin_password_and_clear_sessions("new-hash")
+            .unwrap();
+
+        assert_eq!(db.count_passkeys().unwrap(), 1);
+    }
+
+    #[test]
+    fn password_change_rolls_back_when_session_deletion_fails() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("t.sqlite3")).unwrap();
+        assert!(db.set_admin("old-hash").unwrap());
+        db.create_session("session-one").unwrap();
+        db.lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_session_delete BEFORE DELETE ON sessions \
+                 BEGIN SELECT RAISE(FAIL, 'injected failure'); END;",
+            )
+            .unwrap();
+
+        assert!(db
+            .change_admin_password_and_clear_sessions("new-hash")
+            .is_err());
+
+        assert_eq!(
+            db.admin_password_hash().unwrap().as_deref(),
+            Some("old-hash")
+        );
+        assert!(db.session_exists("session-one").unwrap());
+    }
+
+    #[test]
+    fn password_change_preserves_voice_and_generation_records() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("t.sqlite3")).unwrap();
+        assert!(db.set_admin("old-hash").unwrap());
+        db.insert_speaker("speaker-one", "Speaker").unwrap();
+        db.insert_profile(
+            "profile-one",
+            "speaker-one",
+            "Neutral",
+            "Exact transcript",
+            "voice.wav",
+            8.0,
+        )
+        .unwrap();
+        db.insert_generation_running(
+            "generation-one",
+            "speaker-one",
+            "profile-one",
+            "Target text",
+            1.0,
+        )
+        .unwrap();
+
+        db.change_admin_password_and_clear_sessions("new-hash")
+            .unwrap();
+
+        assert!(db.speaker_by_id("speaker-one").unwrap().is_some());
+        assert!(db.profile_by_id("profile-one").unwrap().is_some());
+        assert!(db.generation_by_id("generation-one").unwrap().is_some());
     }
 
     #[test]

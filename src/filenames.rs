@@ -26,9 +26,7 @@ pub fn download_name_ascii_fallback(text: &str) -> String {
     let ascii: String = stem
         .chars()
         .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c
-            } else if c == '-' || c == '_' {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
                 c
             } else {
                 '_'
@@ -48,7 +46,7 @@ pub fn content_disposition_attachment(text: &str) -> String {
     let utf8_name = download_name_from_text(text);
     let ascii_name = download_name_ascii_fallback(text);
     // Escape double quotes in the ASCII token (should not occur after sanitize).
-    let ascii_safe = ascii_name.replace('\\', "_").replace('"', "_");
+    let ascii_safe = ascii_name.replace(['\\', '"'], "_");
     let encoded = percent_encode_filename(&utf8_name);
     format!("attachment; filename=\"{ascii_safe}\"; filename*=UTF-8''{encoded}")
 }

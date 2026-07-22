@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <script>try{document.documentElement.dataset.theme=localStorage.getItem("vwa-theme")||"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
   <title>Video Work API · 视频工作 API</title>
-  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/styles.css?v=20260721">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260721d">
+  <link rel="stylesheet" href="/static/styles.css?v=20260722c">
   <script src="/static/theme.js?v=20260721" defer></script>
 </head>
 <body>
   <header class="site-header">
     <a class="brand" href="/" aria-label="Video Work API">
-      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8.1 3 C 8 1.9, 12 1.8, 11.9 3.1 L 11.8 7.4 C 11.8 9.2, 8.2 9.3, 8.1 7.5 Z"/><path d="M5.6 7.8 C 5.5 12.2, 14.5 12.3, 14.4 7.9"/><path d="M10 12.4 L 10 15.1"/><path d="M7.4 15.9 L 12.6 15.7"/></svg></span>
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8.4 4.1 C 8.2 2.8, 12 2.7, 11.9 4.3 L 11.8 7.6 C 11.9 9.2, 8.3 9.3, 8.4 7.8 Z"/><path d="M6.3 8 C 6.1 11.9, 14 12.1, 13.8 8.2"/><path d="M10.1 12.1 L 10.1 14.5"/><path d="M7.9 15.2 L 12.4 15"/><circle cx="15" cy="5" r="1.3" fill="currentColor" stroke="none"/></svg></span>
       <span><span class="eyebrow">VIDEO WORK API</span><strong data-i18n="title">视频工作 API</strong></span>
     </a>
     <div class="header-actions">
@@ -49,7 +49,7 @@
         </svg>
         <div class="endpoint-card">
           <div class="endpoint-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12.5 L 12.2 3.8"/><path d="M5.2 3.6 L 12.4 3.5 L 12.3 10.7"/></svg></div>
-          <div><span class="endpoint-label" data-i18n="endpointLabel">MCP SERVER</span><strong><code>/mcp</code></strong><p data-i18n="mcpHint">MCP 服务器运行在此端点，使用 Bearer Token 认证。</p></div>
+          <div><span class="endpoint-label" data-i18n="endpointLabel">MCP SERVER</span><strong><code>/mcp</code></strong><p data-i18n="mcpHint">MCP 服务器运行在此端点，使用 Bearer Token 认证。</p><button id="copyAgentPrompt" class="secondary compact endpoint-copy" type="button" data-i18n="copyAgentPrompt">复制 Agent 提示词</button></div>
         </div>
       </div>
     </section>
@@ -87,22 +87,36 @@
         <div class="section-heading"><div><p class="eyebrow" data-i18n="generateEyebrow">GENERATE</p><h2 data-i18n="generateTitle">生成语音</h2><p class="section-lead" data-i18n="generateLead">选择音色，输入文案，马上试听结果。</p></div><span class="section-number">01</span></div>
         <form id="generateForm">
           <label><span data-i18n="voiceStyle">说话人 / 语气</span><select id="profileSelect" required></select></label>
-          <label><span data-i18n="targetText">目标文案</span><textarea name="target_text" maxlength="1200" rows="7" required></textarea></label>
+          <label><span data-i18n="targetText">目标文案（每个非空行一条）</span><textarea id="targetText" name="target_text" rows="7" required aria-describedby="generationCount generationError"></textarea></label>
+          <div class="batch-toolbar"><span id="generationCount" class="batch-count"></span><span id="generationError" class="field-error" role="alert"></span></div>
           <label><span><span data-i18n="speed">语速</span> <output id="speedValue">1.00×</output></span><input id="speed" name="speed" type="range" min="0.75" max="1.25" step="0.05" value="1"></label>
-          <button id="generateButton" data-i18n="generateButton">生成音频</button>
+          <button id="generateButton">生成 0 条</button>
         </form>
-        <div id="result" class="result hidden"><div class="result-label" data-i18n="resultReady">生成完成</div><audio id="player" controls></audio><a id="download" class="button" download data-i18n="download">下载 WAV</a></div>
+        <div id="generationBatch" class="batch-results hidden">
+          <div class="batch-progress"><span id="generationProgressText" role="status" aria-live="polite" aria-atomic="true"></span><progress id="generationProgress" max="1" value="0"></progress><button id="retryGenerationFailures" type="button" class="secondary compact hidden"></button></div>
+          <div id="generationJobs" class="job-list"></div>
+        </div>
       </section>
       <section class="card subtitles">
         <div class="section-heading"><div><p class="eyebrow" data-i18n="subtitlesEyebrow">SUBTITLES</p><h2 data-i18n="subtitlesTitle">视频字幕提取</h2><p class="section-lead" data-i18n="subtitlesLead">输入 videos 目录中的视频文件名，提取带时间码的字幕。</p></div><span class="section-number">02</span></div>
-        <form id="subtitleForm" class="inline">
-          <label class="grow"><span data-i18n="videoPath">视频文件名</span><input name="video_path" maxlength="500" required placeholder="clip.mp4"></label>
-          <button id="subtitleButton" data-i18n="extractSubtitles">提取字幕</button>
+        <form id="subtitleForm">
+          <label class="grow"><span data-i18n="videoPath">视频文件名（每个非空行一项）</span><textarea id="videoPaths" name="video_path" rows="4" placeholder="clip-01.mp4&#10;clip-02.mp4" aria-describedby="subtitleCount subtitleError"></textarea></label>
+          <div class="grow upload-field">
+            <span data-i18n="videoUpload">也可上传视频文件（每个 ≤2 GB）</span>
+            <div class="upload-control">
+              <input id="videoFileInput" name="video" type="file" multiple accept="video/*,.mkv,.ts,.mpg,.mpeg,.flv,.wmv" class="visually-hidden">
+              <button id="videoFileButton" type="button" class="secondary compact" data-i18n="chooseVideo">选择视频</button>
+              <span id="videoFileName" class="upload-name" data-i18n="noFileChosen">未选择文件</span>
+              <button id="videoFileClear" type="button" class="secondary compact hidden" data-i18n-aria-label="clearFiles" aria-label="清空已选文件" data-i18n="clear">清空</button>
+            </div>
+          </div>
+          <div class="batch-toolbar"><span id="subtitleCount" class="batch-count"></span><span id="subtitleError" class="field-error" role="alert"></span></div>
+          <button id="subtitleButton">提取 0 项字幕</button>
         </form>
         <p class="hint" data-i18n="subtitlesHint">首次提取会下载 ASR 模型，长视频可能需要几分钟。</p>
-        <div id="subtitleResult" class="subtitle-result hidden">
-          <div id="subtitleSegments" class="segments"></div>
-          <div class="subtitle-actions"><a id="subtitleDownload" class="button secondary" download data-i18n="downloadSrt">下载 SRT</a></div>
+        <div id="subtitleBatch" class="batch-results hidden">
+          <div class="batch-progress"><span id="subtitleProgressText" role="status" aria-live="polite" aria-atomic="true"></span><progress id="subtitleProgress" max="1" value="0"></progress><button id="retrySubtitleFailures" type="button" class="secondary compact hidden"></button></div>
+          <div id="subtitleJobs" class="job-list"></div>
         </div>
       </section>
       <section class="card passkeys">
@@ -144,6 +158,7 @@
       </form>
     </article>
   </template>
-  <script src="/static/app.js?v=20260721"></script>
+  <script src="/static/batch-core.js?v=20260722c"></script>
+  <script src="/static/app.js?v=20260722c"></script>
 </body>
 </html>

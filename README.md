@@ -42,6 +42,20 @@ export VWA_MCP_TOKEN="$(openssl rand -hex 32)"
 create the administrator password, then manage voice profiles in the UI or via
 API/MCP.
 
+If you forget the administrator password, reset it interactively from a
+terminal. The new password must contain at least 12 characters:
+
+```bash
+# Source installation
+./scripts/vwactl passwd
+
+# Packaged installation
+sudo vwactl passwd
+```
+
+This signs out all existing web sessions. Registered passkeys, voices, and
+generated data are preserved.
+
 After signing in with the administrator password, add a passkey from the studio
 to enable passwordless sign-in on future visits. Passkeys require an HTTPS
 domain, except that `http://localhost:<port>` is supported for local development.

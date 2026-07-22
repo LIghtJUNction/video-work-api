@@ -422,3 +422,132 @@ async fn spoofed_forwarded_for_does_not_bypass_login_rate_limit() {
         assert_eq!(response.status(), expected);
     }
 }
+
+#[tokio::test]
+async fn subtitle_upload_requires_auth_extracts_and_cleans_up() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("static")).unwrap();
+    fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
+    let settings = test_settings(root);
+    settings.create_data_dirs().unwrap();
+    let db = Database::open(settings.database_path()).unwrap();
+    db.set_admin(&video_work_api::security::hash_password("correct horse battery staple").unwrap())
+        .unwrap();
+    let studio = Arc::new(Studio::new(
+        settings.clone(),
+        db,
+        Arc::new(FakeEngine::new()),
+        Arc::new(FakeSubtitles::default()),
+    ));
+    let app = build_router(AppState {
+        studio,
+        limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_download: Arc::new(ModelDownloadManager::new()),
+    });
+
+    let boundary = "vwa-test-boundary";
+    let multipart = |filename: &str| -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"video\"; filename=\"{filename}\"\r\nContent-Type: video/mp4\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(b"fake video bytes");
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        body
+    };
+    let content_type = format!("multipart/form-data; boundary={boundary}");
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/videos/subtitles/upload")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("content-type", &content_type)
+                .body(Body::from(multipart("clip.mp4")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"password":"correct horse battery staple"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let cookie = res
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/videos/subtitles/upload")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header("content-type", &content_type)
+                .body(Body::from(multipart("clip.txt")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/videos/subtitles/upload")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header("content-type", &content_type)
+                .body(Body::from(multipart("clip.mp4")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["segments"][0]["text"], "hello world");
+    assert!(json["srt"].as_str().unwrap().contains("hello world"));
+
+    let leftovers: Vec<_> = fs::read_dir(&settings.data_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with(".upload-video-")
+        })
+        .collect();
+    assert!(leftovers.is_empty(), "upload temp files must be removed");
+}

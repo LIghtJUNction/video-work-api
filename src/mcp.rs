@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::studio::{Studio, StudioError};
-use crate::{MAX_TEXT_LENGTH, VERSION};
+use crate::{target_text_is_valid, VERSION};
 
 fn mcp_ok(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
@@ -307,9 +307,7 @@ fn call_tool(studio: &Studio, name: &str, arguments: Value) -> Result<Value, Mcp
         "create_speaker" => {
             let args: CreateSpeakerArgs = serde_json::from_value(arguments)
                 .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
-            let payload = studio
-                .create_speaker(&args.name)
-                .map_err(|e| map_studio_err(e))?;
+            let payload = studio.create_speaker(&args.name).map_err(map_studio_err)?;
             Ok(tool_result(payload, None))
         }
         "delete_speaker" => {
@@ -368,7 +366,7 @@ fn call_tool(studio: &Studio, name: &str, arguments: Value) -> Result<Value, Mcp
             let args: GenerationArgs = serde_json::from_value(arguments)
                 .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
             let text = args.target_text.trim();
-            if text.is_empty() || text.len() > MAX_TEXT_LENGTH {
+            if !target_text_is_valid(text) {
                 return Err(McpToolError::InvalidArgs(
                     "Text must contain 1 to 1200 characters".into(),
                 ));

@@ -14,7 +14,7 @@ if [ -x "$installed_root/bin/vwactl" ] || [ -x "$installed_root/vwactl" ]; then
   fi
   data_root=${VWA_DATA_DIR:-$installed_data}
   case "${1:-}" in
-    init|token|setup|model|import|status|paths|serve)
+    init|token|setup|model|import|passwd|status|paths|serve)
       if [ "$(id -u)" -eq 0 ] && [ "${VWA_ADMIN_REEXEC:-0}" != 1 ]; then
         # Avoid inheriting the caller cwd and its uv configuration discovery.
         cd "$app_root"

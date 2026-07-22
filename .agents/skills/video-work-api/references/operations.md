@@ -20,7 +20,7 @@ cargo build --release
 ```
 
 In a packaged install, run administrative commands through `sudo vwactl`. The
-wrapper re-executes setup, init, model, import, status, and paths as the dedicated
+wrapper re-executes setup, init, model, import, passwd, status, and paths as the dedicated
 service account. Do not bypass that wrapper or create root-owned files in
 `/var/lib/video-work-api`.
 
@@ -30,6 +30,20 @@ database, and a mode-0600 one-time token. Print a pending token again with
 `vwactl token create --rotate` before first web setup. Enter that token in the
 web setup page and create a password of at least 12 characters. Successful setup
 removes the token. Do not paste it into logs or chat.
+
+If the administrator password is lost, reset it interactively from a terminal:
+
+```bash
+# Source installation
+./scripts/vwactl passwd
+
+# Packaged installation
+sudo vwactl passwd
+```
+
+The command hides both password entries, requires at least 12 characters, and
+signs out every existing web session. Registered passkeys and all voice and
+generated data are preserved.
 
 Run `vwactl model download` only with explicit approval for the multi-gigabyte
 download. It shells out to the Hugging Face CLI (`hf download`), pins both the

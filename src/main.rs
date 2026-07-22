@@ -1,6 +1,7 @@
 //! `vwactl` — Video Work API control binary.
 
 use std::env;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -61,6 +62,8 @@ enum Commands {
         #[arg(long)]
         confirm_rights: bool,
     },
+    /// Change the admin password (signs out all web sessions)
+    Passwd,
     /// Show readiness status
     Status,
     /// Print configured paths
@@ -89,11 +92,14 @@ enum TokenCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args: Vec<OsString> = env::args_os().collect();
+    reject_passwd_arguments(&args)?;
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse()?))
         .init();
 
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(args);
     let settings = Settings::from_env()?;
 
     match cli.command {
@@ -114,10 +120,26 @@ async fn main() -> Result<()> {
             path,
             confirm_rights,
         } => cmd_import(&settings, &path, confirm_rights),
+        Commands::Passwd => cmd_passwd(&settings),
         Commands::Status => cmd_status(&settings),
         Commands::Paths => cmd_paths(&settings),
         Commands::Serve => cmd_serve(settings).await,
     }
+}
+
+fn reject_passwd_arguments(args: &[OsString]) -> Result<()> {
+    if args.get(1).map(OsString::as_os_str) != Some(OsStr::new("passwd")) {
+        return Ok(());
+    }
+    let allowed = match args.get(2..) {
+        Some([]) => true,
+        Some([argument]) => argument == OsStr::new("-h") || argument == OsStr::new("--help"),
+        _ => false,
+    };
+    if !allowed {
+        bail!("passwd accepts no arguments; enter the password interactively");
+    }
+    Ok(())
 }
 
 /// `vwactl init` / `vwactl token create`: ensure a pending token exists and print it.
@@ -212,6 +234,33 @@ fn print_token(token: &str, raw: bool, created: bool, settings: &Settings) {
     eprintln!("Re-print later:  vwactl token");
     eprintln!("Rotate:          vwactl token create --rotate");
     eprintln!("Scripting:       vwactl token --raw");
+}
+
+/// `vwactl passwd`: interactive password change; clears web sessions.
+fn cmd_passwd(settings: &Settings) -> Result<()> {
+    use std::io::IsTerminal;
+
+    settings.create_data_dirs()?;
+    let db = Database::open(settings.database_path())?;
+    if !db.configured()? {
+        bail!("administrator is not configured; complete first-time web setup first");
+    }
+    if !std::io::stdin().is_terminal() {
+        bail!("password input requires a terminal; run `vwactl passwd` in a terminal");
+    }
+
+    let first = rpassword::prompt_password("New admin password (12+ chars): ")?;
+    if !video_work_api::security::is_admin_password_valid(&first) {
+        bail!("password must be at least 12 characters");
+    }
+    let second = rpassword::prompt_password("Confirm new password: ")?;
+    if first != second {
+        bail!("passwords do not match");
+    }
+    let hash = video_work_api::security::hash_password(&first)?;
+    db.change_admin_password_and_clear_sessions(&hash)?;
+    println!("Password updated; all web sessions signed out.");
+    Ok(())
 }
 
 fn token_file_present(path: &Path) -> Result<bool> {

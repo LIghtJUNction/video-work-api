@@ -10,6 +10,13 @@ const SCRYPT_N_LOG2: u8 = 14; // 2^14
 const SCRYPT_R: u32 = 8;
 const SCRYPT_P: u32 = 1;
 const SCRYPT_DKLEN: usize = 32;
+const MIN_ADMIN_PASSWORD_CHARS: usize = 12;
+
+/// Returns whether an administrator password contains at least 12 Unicode
+/// scalar values.
+pub fn is_admin_password_valid(password: &str) -> bool {
+    password.chars().count() >= MIN_ADMIN_PASSWORD_CHARS
+}
 
 pub fn hash_password(password: &str) -> anyhow::Result<String> {
     let mut salt = [0u8; 16];
@@ -124,6 +131,16 @@ mod tests {
         let hash = hash_password("correct horse battery staple").unwrap();
         assert!(verify_password("correct horse battery staple", &hash));
         assert!(!verify_password("wrong password here", &hash));
+    }
+
+    #[test]
+    fn admin_password_accepts_twelve_unicode_characters() {
+        assert!(is_admin_password_valid("密码密码密码密码密码密码"));
+    }
+
+    #[test]
+    fn admin_password_rejects_eleven_unicode_characters() {
+        assert!(!is_admin_password_valid("密码密码密码密码密码密"));
     }
 
     #[test]

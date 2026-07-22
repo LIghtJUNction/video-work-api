@@ -363,6 +363,16 @@ impl Studio {
             "srt": srt,
         }))
     }
+
+    /// Extract subtitles from a server-created upload temp file (already trusted,
+    /// so the video_input_dir sandbox does not apply).
+    pub fn extract_subtitles_from_upload(&self, video_path: &Path) -> Result<Value> {
+        let (segments, srt) = self.subtitles.extract(video_path)?;
+        Ok(json!({
+            "segments": segments,
+            "srt": srt,
+        }))
+    }
 }
 
 /// Python used for CosyVoice/FunClip helpers (venv preferred).

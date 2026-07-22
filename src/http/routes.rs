@@ -29,10 +29,12 @@ use crate::model::{download_model, model_files_present, ModelDownloadManager};
 use crate::passkeys::{CeremonyStore, CeremonyStoreError, PasskeyWebauthn, PendingCeremony};
 use crate::paths::safe_owned_file;
 use crate::security::{
-    constant_time_eq, hash_password, new_session_token, token_hash, verify_password,
+    constant_time_eq, hash_password, is_admin_password_valid, new_session_token, token_hash,
+    verify_password,
 };
 use crate::studio::{Studio, StudioError};
-use crate::{COOKIE_NAME, MAX_TEXT_LENGTH};
+use crate::subtitles::{video_extension_allowed, MAX_VIDEO_UPLOAD_BYTES};
+use crate::{target_text_is_valid, COOKIE_NAME};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -91,6 +93,12 @@ pub fn build_router(state: AppState) -> Router {
             get(generation_audio),
         )
         .route("/api/videos/subtitles", post(video_subtitles))
+        .route(
+            "/api/videos/subtitles/upload",
+            post(video_subtitles_upload).layer(DefaultBodyLimit::max(
+                MAX_VIDEO_UPLOAD_BYTES as usize + 1024 * 1024,
+            )),
+        )
         .route("/mcp", post(mcp_handler))
         .layer(DefaultBodyLimit::max(
             MAX_UPLOAD_BYTES as usize + 1024 * 1024,
@@ -360,7 +368,7 @@ async fn setup(State(state): State<AppState>, Json(body): Json<SetupBody>) -> Ap
             "Setup is already complete",
         ));
     }
-    if body.password.len() < 12 {
+    if !is_admin_password_valid(&body.password) {
         return Err(AppError::invalid_request(
             "Password must contain at least 12 characters",
         ));
@@ -380,7 +388,7 @@ async fn setup(State(state): State<AppState>, Json(body): Json<SetupBody>) -> Ap
             "Setup token is invalid",
         ));
     }
-    let digest = hash_password(&body.password).map_err(|e| AppError::Internal(e))?;
+    let digest = hash_password(&body.password).map_err(AppError::Internal)?;
     if !state.studio.database.set_admin(&digest)? {
         return Err(AppError::api(
             StatusCode::CONFLICT,
@@ -1048,7 +1056,7 @@ async fn generate(
 ) -> AppResult<Response> {
     require_auth(&state, &jar)?;
     let text = body.target_text.trim();
-    if text.is_empty() || text.len() > MAX_TEXT_LENGTH {
+    if !target_text_is_valid(text) {
         return Err(AppError::invalid_request(
             "Text must contain 1 to 1200 characters",
         ));
@@ -1163,23 +1171,104 @@ async fn video_subtitles(
         .map_err(|e| AppError::Internal(e.into()))?;
     match result {
         Ok(v) => Ok(Json(v)),
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("must be inside") {
-                Err(AppError::api(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "invalid_video_path",
-                    msg,
-                ))
-            } else {
-                tracing::warn!(error = %msg, "Subtitle extraction failed");
-                Err(AppError::api(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "subtitle_extraction_failed",
-                    msg,
-                ))
-            }
+        Err(e) => Err(subtitle_error(&e)),
+    }
+}
+
+fn subtitle_error(e: &anyhow::Error) -> AppError {
+    let msg = e.to_string();
+    if msg.contains("must be inside") {
+        AppError::api(StatusCode::UNPROCESSABLE_ENTITY, "invalid_video_path", msg)
+    } else {
+        tracing::warn!(error = %msg, "Subtitle extraction failed");
+        AppError::api(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "subtitle_extraction_failed",
+            msg,
+        )
+    }
+}
+
+async fn video_subtitles_upload(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    mut multipart: Multipart,
+) -> AppResult<Json<Value>> {
+    require_auth(&state, &jar)?;
+    let mut upload_path: Option<PathBuf> = None;
+
+    while let Some(mut field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::invalid_request(e.to_string()))?
+    {
+        if field.name() != Some("video") {
+            continue;
         }
+        let original_name = field.file_name().unwrap_or("video.mp4").to_string();
+        let suffix = Path::new(&original_name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| format!(".{}", e.to_ascii_lowercase()))
+            .unwrap_or_else(|| ".mp4".into());
+        if !video_extension_allowed(Path::new(&format!("x{suffix}"))) {
+            return Err(AppError::api(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported_video",
+                "Unsupported video format",
+            ));
+        }
+        let temp = state.studio.settings.data_dir.join(format!(
+            ".upload-video-{}{}",
+            Uuid::new_v4(),
+            suffix
+        ));
+        let mut file = tokio::fs::File::create(&temp)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        let mut total: u64 = 0;
+        let write_result: AppResult<()> = async {
+            while let Some(chunk) = field
+                .chunk()
+                .await
+                .map_err(|e| AppError::invalid_request(e.to_string()))?
+            {
+                total += chunk.len() as u64;
+                if total > MAX_VIDEO_UPLOAD_BYTES {
+                    return Err(AppError::api(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "upload_too_large",
+                        "Video exceeds 2 GiB",
+                    ));
+                }
+                tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
+                    .await
+                    .map_err(|e| AppError::Internal(e.into()))?;
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(e) = write_result {
+            let _ = fs::remove_file(&temp);
+            return Err(e);
+        }
+        upload_path = Some(temp);
+    }
+
+    let Some(upload_path) = upload_path else {
+        return Err(AppError::invalid_request("Video file is required"));
+    };
+
+    let studio = state.studio.clone();
+    let path_c = upload_path.clone();
+    let result = tokio::task::spawn_blocking(move || studio.extract_subtitles_from_upload(&path_c))
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+    let _ = fs::remove_file(&upload_path);
+
+    match result {
+        Ok(v) => Ok(Json(v)),
+        Err(e) => Err(subtitle_error(&e)),
     }
 }
 
