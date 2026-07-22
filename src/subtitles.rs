@@ -1,7 +1,9 @@
-use std::fs::{self, File};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::collections::VecDeque;
+use std::fs;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus};
+use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -84,16 +86,42 @@ enum FunClipWaitOutcome {
     WaitFailed(io::Error),
 }
 
-fn read_funclip_stderr(path: &Path) -> io::Result<CapturedStderr> {
-    let mut file = File::open(path)?;
-    let length = file.metadata()?.len();
-    let truncated = length > MAX_FUNCLIP_STDERR_BYTES as u64;
-    if truncated {
-        file.seek(SeekFrom::End(-(MAX_FUNCLIP_STDERR_BYTES as i64)))?;
+fn drain_funclip_stderr(mut stderr: ChildStderr) -> io::Result<CapturedStderr> {
+    let mut tail = VecDeque::with_capacity(MAX_FUNCLIP_STDERR_BYTES);
+    let mut total_bytes = 0usize;
+    let mut buffer = [0u8; 8192];
+    loop {
+        let bytes_read = stderr.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        total_bytes = total_bytes.saturating_add(bytes_read);
+        if bytes_read >= MAX_FUNCLIP_STDERR_BYTES {
+            tail.clear();
+            tail.extend(&buffer[bytes_read - MAX_FUNCLIP_STDERR_BYTES..bytes_read]);
+        } else {
+            let overflow = tail
+                .len()
+                .saturating_add(bytes_read)
+                .saturating_sub(MAX_FUNCLIP_STDERR_BYTES);
+            if overflow > 0 {
+                tail.drain(..overflow);
+            }
+            tail.extend(&buffer[..bytes_read]);
+        }
     }
-    let mut bytes = Vec::with_capacity(length.min(MAX_FUNCLIP_STDERR_BYTES as u64) as usize);
-    file.read_to_end(&mut bytes)?;
-    Ok(CapturedStderr { bytes, truncated })
+    Ok(CapturedStderr {
+        bytes: tail.into_iter().collect(),
+        truncated: total_bytes > MAX_FUNCLIP_STDERR_BYTES,
+    })
+}
+
+fn join_funclip_stderr(reader: JoinHandle<io::Result<CapturedStderr>>) -> String {
+    match reader.join() {
+        Ok(Ok(stderr)) => stderr_context(&stderr),
+        Ok(Err(error)) => format!("read FunClip stderr: {error}"),
+        Err(_) => "join FunClip stderr reader: thread panicked".to_string(),
+    }
 }
 
 fn stderr_context(stderr: &CapturedStderr) -> String {
@@ -170,8 +198,6 @@ impl SubtitleExtractor for FunClipExtractor {
             .context("FunClip is not installed; set VWA_FUNCLIP_ROOT")?;
         let temp = tempfile::tempdir_in(std::env::temp_dir()).context("temp dir")?;
         let output_dir = temp.path();
-        let stderr_path = output_dir.join("funclip.stderr.log");
-        let stderr_file = File::create(&stderr_path).context("create FunClip stderr log")?;
         let mut command = Command::new(&self.python);
         command.arg(&script).args([
             "--stage",
@@ -188,10 +214,12 @@ impl SubtitleExtractor for FunClipExtractor {
         }
         let mut child = command
             .current_dir(root)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::from(stderr_file))
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .context("spawn FunClip")?;
+        let stderr = child.stderr.take().context("capture FunClip stderr")?;
+        let stderr_reader = std::thread::spawn(move || drain_funclip_stderr(stderr));
 
         let start = std::time::Instant::now();
         let outcome = loop {
@@ -212,10 +240,7 @@ impl SubtitleExtractor for FunClipExtractor {
                 terminate_funclip(&mut child)
             }
         };
-        let stderr = match read_funclip_stderr(&stderr_path) {
-            Ok(stderr) => stderr_context(&stderr),
-            Err(error) => format!("read FunClip stderr log: {error}"),
-        };
+        let stderr = join_funclip_stderr(stderr_reader);
         let cleanup = if cleanup_errors.is_empty() {
             String::new()
         } else {
@@ -292,6 +317,32 @@ impl SubtitleExtractor for FakeSubtitles {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn process_terminated(pid: i32) -> bool {
+        // SAFETY: signal 0 only probes a positive PID written by the test helper.
+        if unsafe { libc::kill(pid, 0) } == -1
+            && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+        {
+            return true;
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let stat = fs::read_to_string(format!("/proc/{pid}/stat"));
+            return match stat {
+                Ok(stat) => {
+                    stat.rsplit_once(") ")
+                        .and_then(|(_, fields)| fields.chars().next())
+                        == Some('Z')
+                }
+                Err(error) => error.kind() == io::ErrorKind::NotFound,
+            };
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        false
+    }
 
     #[test]
     fn parse_basic_srt() {
@@ -382,19 +433,17 @@ wait
             .trim()
             .parse()
             .expect("parse descendant pid");
-        let descendant_gone = (0..20).any(|_| {
-            // SAFETY: kill with signal 0 only probes a positive PID written by the test helper.
-            let gone = unsafe { libc::kill(pid, 0) } == -1
-                && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
-            if !gone {
+        let descendant_terminated = (0..20).any(|_| {
+            let terminated = process_terminated(pid);
+            if !terminated {
                 std::thread::sleep(Duration::from_millis(25));
             }
-            gone
+            terminated
         });
 
         assert!(
-            result.is_err() && elapsed < Duration::from_secs(1) && descendant_gone,
-            "result={result:?}, elapsed={elapsed:?}, descendant_gone={descendant_gone}"
+            result.is_err() && elapsed < Duration::from_secs(1) && descendant_terminated,
+            "result={result:?}, elapsed={elapsed:?}, descendant_terminated={descendant_terminated}"
         );
     }
 }

@@ -706,7 +706,39 @@ async fn cmd_serve(mut settings: Settings) -> Result<()> {
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await
     .context("serve")?;
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let ctrl_c = tokio::signal::ctrl_c();
+        let terminate = async {
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(mut signal) => {
+                    signal.recv().await;
+                }
+                Err(error) => {
+                    tracing::error!(%error, "install SIGTERM handler");
+                    std::future::pending::<()>().await;
+                }
+            }
+        };
+        tokio::select! {
+            result = ctrl_c => {
+                if let Err(error) = result {
+                    tracing::error!(%error, "listen for Ctrl-C");
+                }
+            }
+            _ = terminate => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        tracing::error!(%error, "listen for Ctrl-C");
+    }
 }
