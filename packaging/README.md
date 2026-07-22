@@ -45,9 +45,14 @@ yay -S video-work-api-git
 sudo vwactl setup
 sudo vwactl init
 sudo vwactl model download   # 需明确同意的大体积下载
-# 可选：编辑 /etc/video-work-api/config.env 写入 VWA_MCP_TOKEN
 sudo systemctl start video-work-api.service
 ```
+
+安装和升级钩子会以 `video-work-api` 服务用户执行 `vwactl mcp-token ensure`，在
+`/var/lib/video-work-api/mcp-token` 创建或复用权限 0600 的持久 Token；不会启动、
+重启或启用服务，也不会输出 Token。管理员登录网页后直接使用“复制 Agent 提示词”
+配置 Codex。仅在兼容旧部署时才需要在 `config.env` 设置优先级更高的
+`VWA_MCP_TOKEN`。
 
 ## 本地试构建（不上传 AUR）
 

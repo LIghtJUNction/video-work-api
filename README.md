@@ -34,13 +34,24 @@ cargo build --release
 ./scripts/vwactl setup          # Python venv for CosyVoice/FunClip only
 ./scripts/vwactl init
 ./scripts/vwactl model download
-export VWA_MCP_TOKEN="$(openssl rand -hex 32)"
 ./scripts/vwactl serve
 ```
 
 `vwactl init` prints a one-time setup token. Open `http://localhost:7860`,
 create the administrator password, then manage voice profiles in the UI or via
 API/MCP.
+
+`init` and `serve` automatically create a persistent mode-0600 MCP token at
+`$VWA_DATA_DIR/mcp-token`. It remains stable across restarts and upgrades. After
+administrator login, click **Copy agent prompt**: the copied Codex-first prompt
+contains the active token and asks exactly once whether to install for the
+current project or globally. The button and token endpoint are unavailable
+before login. Rotate deliberately with `vwactl mcp-token rotate`, then restart
+the service, sign in as administrator, copy the new agent prompt, and rerun the
+same project/global install branch so its static header is replaced. Finally,
+restart or open a new Codex session and verify live tools; restarting alone does
+not update client configuration. `VWA_MCP_TOKEN` remains a compatibility
+override and is never written or printed.
 
 If you forget the administrator password, reset it interactively from a
 terminal. The new password must contain at least 12 characters:
@@ -75,7 +86,8 @@ disk capacity.
 
 Environment variables (prefix `VWA_`): `VWA_DATA_DIR`, `VWA_MODEL_DIR`,
 `VWA_COSYVOICE_ROOT`, `VWA_FUNCLIP_ROOT`, `VWA_SETUP_TOKEN_FILE`, `VWA_HOST`,
-`VWA_PORT`, `VWA_MCP_TOKEN`, `VWA_VIDEO_INPUT_DIR`, `VWA_REFERENCE_INPUT_DIR`,
+`VWA_PORT`, `VWA_MCP_TOKEN_FILE`, optional compatibility override
+`VWA_MCP_TOKEN`, `VWA_VIDEO_INPUT_DIR`, `VWA_REFERENCE_INPUT_DIR`,
 `VWA_SUBTITLE_TIMEOUT`, `VWA_PYTHON`, `VWA_PROJECT_ROOT`, optional
 `VWA_SSL_CERTFILE` / `VWA_SSL_KEYFILE` (validated; terminate TLS at a reverse
 proxy for production HTTPS). Defaults live under `~/.local/share/video-work-api`.
@@ -111,29 +123,20 @@ Response includes `segments[{index,start,end,text}]` and full `srt`.
 
 ### 3. HTTP MCP for agents
 
-```bash
-curl -sS -X POST "http://127.0.0.1:7860/mcp" \
-  -H "Authorization: Bearer $VWA_MCP_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-```
-
 Tools: `get_status`, `list_speakers`, `create_speaker`, `delete_speaker`,
 `add_voice_profile`, `delete_voice_profile`, `generate_speech`, `get_generation`,
 `extract_video_subtitles`.
 
-Example client config (field names vary by host):
+Sign in to the web studio and click **Copy agent prompt**. Paste it into Codex,
+answer its single scope question, and it will safely merge one of these Codex
+configuration locations without printing the token:
 
-```json
-{
-  "mcpServers": {
-    "video-work-api": {
-      "url": "http://127.0.0.1:7860/mcp",
-      "headers": { "Authorization": "Bearer ${VWA_MCP_TOKEN}" }
-    }
-  }
-}
-```
+- current trusted project: `.codex/config.toml` (locally excluded from Git)
+- global: `~/.codex/config.toml`
+
+Restart Codex or open a new session after installation, then verify the live
+MCP connection and tools. The configuration contains a plaintext secret and is
+therefore restricted to mode 0600.
 
 ## systemd
 

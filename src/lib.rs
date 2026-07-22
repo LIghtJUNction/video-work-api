@@ -9,6 +9,7 @@ pub mod filenames;
 pub mod http;
 pub mod importer;
 pub mod mcp;
+pub mod mcp_token;
 pub mod model;
 pub mod passkeys;
 pub mod paths;

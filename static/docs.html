@@ -182,6 +182,9 @@
         <code>initialize</code>、<code>notifications/initialized</code>、
         <code>tools/list</code>、<code>tools/call</code>。
       </p>
+      <p data-i18n="mcpInstall">
+        MCP Token 由服务自动持久化且不会显示在公开状态中。管理员登录后使用“复制 Agent 提示词”，粘贴给 Codex，并选择安装到当前受信任项目或全局；重启或新建 Codex 会话后验证工具连接。
+      </p>
       <div class="endpoint-table tools" role="table">
         <div class="endpoint-row endpoint-head" role="row">
           <span data-i18n="colTool">工具</span>
@@ -323,6 +326,7 @@
         descSubtitlesUpload:
           "multipart 字段 video（≤2 GB，常见视频格式）；提取后删除临时文件，返回 {segments, srt}。",
         mcpIntro: "端点 POST /mcp。JSON-RPC 2.0 方法：initialize、notifications/initialized、tools/list、tools/call。",
+        mcpInstall: "MCP Token 由服务自动持久化且不会显示在公开状态中。管理员登录后使用“复制 Agent 提示词”，粘贴给 Codex，并选择安装到当前受信任项目或全局；重启或新建 Codex 会话后验证工具连接。Token 轮换后必须重新登录、复制新提示词并重跑同一安装分支；仅重启不够。",
         toolStatus: "服务 / 模型 / FunClip 状态",
         toolList: "说话人与 profiles",
         toolCreate: "创建说话人",
@@ -383,6 +387,7 @@
         descSubtitlesUpload:
           "multipart field video (≤2 GB, common video formats); the temp file is deleted after extraction; returns {segments, srt}.",
         mcpIntro: "Endpoint POST /mcp. JSON-RPC 2.0: initialize, notifications/initialized, tools/list, tools/call.",
+        mcpInstall: "The service persists its MCP token automatically and never includes it in public status. After administrator login, use Copy agent prompt, paste it into Codex, and choose the current trusted project or global installation; restart or open a new Codex session and verify the tools. After rotation, sign in again, copy the new prompt, and rerun the same branch; restarting alone is insufficient.",
         toolStatus: "Service / model / FunClip status",
         toolList: "Speakers and profiles",
         toolCreate: "Create a speaker",

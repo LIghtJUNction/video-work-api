@@ -9,6 +9,7 @@ Group=video-work-api
 WorkingDirectory=/usr/lib/video-work-api
 Environment=VWA_DATA_DIR=/var/lib/video-work-api
 Environment=VWA_SETUP_TOKEN_FILE=/var/lib/video-work-api/setup-token
+Environment=VWA_MCP_TOKEN_FILE=/var/lib/video-work-api/mcp-token
 Environment=VWA_PROJECT_ROOT=/usr/lib/video-work-api
 Environment=VWA_PYTHON=/var/lib/video-work-api/.venv/bin/python
 EnvironmentFile=-/etc/video-work-api/config.env

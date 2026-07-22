@@ -8,7 +8,7 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tempfile::tempdir;
 use tower::ServiceExt;
-use video_work_api::config::Settings;
+use video_work_api::config::{McpTokenSource, Settings};
 use video_work_api::database::Database;
 use video_work_api::engine::FakeEngine;
 use video_work_api::http::{build_router, AppState, LoginLimiter};
@@ -28,6 +28,8 @@ fn test_settings(root: &std::path::Path) -> Settings {
         ssl_certfile: None,
         ssl_keyfile: None,
         mcp_token: Some("mcp-secret-token".into()),
+        mcp_token_file: root.join("mcp-token"),
+        mcp_token_source: Some(McpTokenSource::Environment),
         funclip_root: None,
         video_input_dir: root.join("videos"),
         reference_input_dir: root.join("references"),

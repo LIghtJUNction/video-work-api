@@ -16,6 +16,8 @@ pub struct Settings {
     pub ssl_certfile: Option<PathBuf>,
     pub ssl_keyfile: Option<PathBuf>,
     pub mcp_token: Option<String>,
+    pub mcp_token_file: PathBuf,
+    pub mcp_token_source: Option<McpTokenSource>,
     pub funclip_root: Option<PathBuf>,
     pub video_input_dir: PathBuf,
     pub reference_input_dir: PathBuf,
@@ -23,10 +25,26 @@ pub struct Settings {
     pub project_root: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpTokenSource {
+    Environment,
+    File,
+}
+
+impl McpTokenSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Environment => "env",
+            Self::File => "file",
+        }
+    }
+}
+
 impl Settings {
     pub fn from_env() -> Result<Self> {
         let project_root = discover_project_root();
-        let data = env_path("VWA_DATA_DIR", default_data_dir());
+        let data_lexical = env_lexical_path("VWA_DATA_DIR", default_data_dir());
+        let data = data_lexical.canonicalize_lossy();
         let model = env_path(
             "VWA_MODEL_DIR",
             data.join("models").join("Fun-CosyVoice3-0.5B-2512"),
@@ -36,6 +54,13 @@ impl Settings {
             project_root.join("vendor").join("CosyVoice"),
         );
         let token = env_path("VWA_SETUP_TOKEN_FILE", data.join("setup-token"));
+        // Keep this path lexical so the token layer can reject the final path
+        // itself when it is a symlink. Canonicalizing here would erase that fact.
+        let mcp_token_file = env_lexical_path("VWA_MCP_TOKEN_FILE", data_lexical.join("mcp-token"));
+        let (mcp_token, mcp_token_source) = match env::var("VWA_MCP_TOKEN") {
+            Ok(value) if !value.is_empty() => (Some(value), Some(McpTokenSource::Environment)),
+            _ => (None, None),
+        };
         let funclip_default = project_root.join("vendor").join("FunClip");
         let funclip_root = match env::var_os("VWA_FUNCLIP_ROOT") {
             Some(v) => Some(PathBuf::from(v).expand_user().canonicalize_lossy()),
@@ -56,7 +81,9 @@ impl Settings {
                 .unwrap_or(7860),
             ssl_certfile: env::var_os("VWA_SSL_CERTFILE").map(|v| PathBuf::from(v).expand_user()),
             ssl_keyfile: env::var_os("VWA_SSL_KEYFILE").map(|v| PathBuf::from(v).expand_user()),
-            mcp_token: env::var("VWA_MCP_TOKEN").ok().filter(|s| !s.is_empty()),
+            mcp_token,
+            mcp_token_file,
+            mcp_token_source,
             funclip_root,
             video_input_dir,
             reference_input_dir,
@@ -66,6 +93,24 @@ impl Settings {
                 .unwrap_or(1800),
             project_root,
         })
+    }
+
+    /// Load the persistent MCP token only for commands that need MCP state.
+    pub fn load_mcp_token(&mut self) -> Result<()> {
+        if self.mcp_token_source == Some(McpTokenSource::Environment) {
+            return Ok(());
+        }
+        match crate::mcp_token::load(&self.mcp_token_file)? {
+            Some(token) => {
+                self.mcp_token = Some(token);
+                self.mcp_token_source = Some(McpTokenSource::File);
+            }
+            None => {
+                self.mcp_token = None;
+                self.mcp_token_source = None;
+            }
+        }
+        Ok(())
     }
 
     pub fn database_path(&self) -> PathBuf {
@@ -141,6 +186,12 @@ fn env_path(name: &str, default: PathBuf) -> PathBuf {
     env::var_os(name)
         .map(|v| PathBuf::from(v).expand_user().canonicalize_lossy())
         .unwrap_or_else(|| default.expand_user().canonicalize_lossy())
+}
+
+fn env_lexical_path(name: &str, default: PathBuf) -> PathBuf {
+    env::var_os(name)
+        .map(|value| PathBuf::from(value).expand_user())
+        .unwrap_or_else(|| default.expand_user())
 }
 
 trait PathExt {

@@ -26,11 +26,12 @@ cargo build --release
 ./scripts/vwactl setup          # 仅为 CosyVoice/FunClip 初始化 Python 虚拟环境
 ./scripts/vwactl init
 ./scripts/vwactl model download
-export VWA_MCP_TOKEN="$(openssl rand -hex 32)"
 ./scripts/vwactl serve
 ```
 
 `vwactl init` 会在控制台打印一次性初始化令牌。在浏览器中打开 `http://127.0.0.1:7860`，输入该令牌并设置管理员密码，即可通过 Web 界面或 API/MCP 管理声音文件。
+
+`init` 和 `serve` 会自动在 `$VWA_DATA_DIR/mcp-token` 创建权限为 0600 的持久 MCP Token，重启和升级后保持不变。管理员登录后点击**复制 Agent 提示词**，复制内容会直接包含当前真实 Token，并且只会先询问一次“安装到当前项目还是全局？”。登录前按钮和 Token 接口均不可用。主动轮换请执行 `vwactl mcp-token rotate`，然后重启服务、以管理员登录网页、复制新的 Agent 提示词，并重新执行原先选择的项目或全局安装分支以替换静态 Token；最后重启或新建 Codex 会话并验证真实工具连接。仅重启服务或客户端不会更新配置。`VWA_MCP_TOKEN` 仅作为兼容覆盖项，程序不会写出或打印它。
 
 ### 环境变量 (前缀 `VWA_`)
 
@@ -39,9 +40,10 @@ export VWA_MCP_TOKEN="$(openssl rand -hex 32)"
 - `VWA_COSYVOICE_ROOT`：CosyVoice 源码路径
 - `VWA_FUNCLIP_ROOT`：FunClip 源码路径
 - `VWA_SETUP_TOKEN_FILE`：初始化令牌保存文件路径
+- `VWA_MCP_TOKEN_FILE`：持久 MCP Token 文件路径（默认 `$VWA_DATA_DIR/mcp-token`）
 - `VWA_HOST`：监听的主机地址
 - `VWA_PORT`：监听的端口号（默认 `7860`）
-- `VWA_MCP_TOKEN`：MCP 服务的 Bearer Token 鉴权令牌
+- `VWA_MCP_TOKEN`：可选兼容覆盖项，优先于 Token 文件
 - `VWA_VIDEO_INPUT_DIR`：视频输入目录
 - `VWA_REFERENCE_INPUT_DIR`：声音克隆参考音频目录
 - `VWA_SUBTITLE_TIMEOUT`：字幕提取超时时间
@@ -78,13 +80,6 @@ curl -sS -X POST "http://127.0.0.1:7860/api/videos/subtitles" \
 
 ### 3. 面向 AI Agent 的 HTTP MCP
 
-```bash
-curl -sS -X POST "http://127.0.0.1:7860/mcp" \
-  -H "Authorization: Bearer $VWA_MCP_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-```
-
 提供的主要 MCP 工具：
 - `get_status`：获取服务、模型和 FunClip 的就绪状态
 - `list_speakers`：列出所有说话人及声音配置 (Profiles)
@@ -96,17 +91,7 @@ curl -sS -X POST "http://127.0.0.1:7860/mcp" \
 - `get_generation`：获取已生成的音频信息
 - `extract_video_subtitles`：提取视频字幕
 
-MCP 客户端配置示例 (Cline / Claude Desktop 等)：
-```json
-{
-  "mcpServers": {
-    "video-work-api": {
-      "url": "http://127.0.0.1:7860/mcp",
-      "headers": { "Authorization": "Bearer ${VWA_MCP_TOKEN}" }
-    }
-  }
-}
-```
+管理员登录网页后点击**复制 Agent 提示词**，粘贴给 Codex 并回答唯一一次安装范围问题。提示词会安全合并到当前受信任项目的 `.codex/config.toml`（并在本仓库本地排除 Git 跟踪）或全局 `~/.codex/config.toml`，不会在终端打印 Token。安装后重启 Codex 或打开新会话，再验证真实 MCP 连接和工具列表。配置文件含明文密钥，因此权限必须为 0600。
 
 ## systemd 服务配置
 
