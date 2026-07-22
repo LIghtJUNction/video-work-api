@@ -5,103 +5,54 @@ const {
   createPromptAccessController,
 } = require("../static/agent-prompt.js");
 
-test("Chinese prompt asks exactly one scope question before mutation", () => {
+test("agent prompt uses the concise cross-client MCP configuration template", () => {
   const url = "https://voice.example.com/mcp";
   const token = "test-token-value";
   const prompt = buildAgentPrompt("zh", url, token);
-  assert.equal((prompt.match(/安装到当前项目还是全局？/g) || []).length, 1);
-  assert.ok(prompt.indexOf("安装到当前项目还是全局？") < prompt.indexOf("如果回答“当前项目”"));
-  assert.ok(prompt.includes(`codex mcp add video-work-api --url ${url}`));
-  assert.ok(prompt.includes(token));
-  assert.ok(!prompt.includes("<VWA_MCP_TOKEN>"));
-  assert.ok(prompt.includes("[mcp_servers.video-work-api]"));
-  assert.ok(prompt.includes(`http_headers = { Authorization = "Bearer ${token}" }`));
-  assert.ok(prompt.includes(".git/info/exclude"));
-  assert.ok(prompt.includes("/.codex/.config.toml.video-work-api.tmp"));
-  assert.ok(prompt.includes("git ls-files"));
-  assert.ok(prompt.includes("git check-ignore"));
-  assert.ok(prompt.includes("git status --short --untracked-files=all"));
-  assert.ok(prompt.includes("fsync，并原子 rename"));
-  assert.ok(prompt.includes("只包含下面两个键"));
-  for (const conflicting of ["command", "args", "bearer_token_env_var", "env_http_headers", "auth"]) {
-    assert.ok(prompt.includes(conflicting));
-  }
-  assert.ok(prompt.includes("initialize/tools/list"));
-  assert.ok(prompt.includes("仅重启不够"));
-  assert.ok(!prompt.includes("opencode"));
-  assert.ok(!prompt.includes("Claude"));
-  assert.ok(!prompt.includes("export VWA_MCP_TOKEN"));
-  assert.ok(!prompt.includes("bearer-token-env-var"));
+  assert.equal(prompt, [
+    "请为当前项目添加 MCP 配置。",
+    "",
+    "要求：",
+    "1. 自动识别当前环境：",
+    "   - Codex：添加项目级 MCP 到 .codex/config.toml",
+    "   - Claude Code：添加项目级 MCP 到 .mcp.json",
+    "",
+    "2. 如果需要全局配置，则：",
+    "   - Codex 使用用户级 MCP 配置",
+    "   - Claude Code 使用 user/global scope MCP 配置",
+    "",
+    "3. 不覆盖已有 MCP，只新增或更新指定 MCP。",
+    "",
+    "4. Authorization/Bearer Token 属于密钥，不得在终端、日志或最终回复中回显；输出配置时必须脱敏。写入项目级配置前，确认配置文件不会被 Git 跟踪或提交；否则停止并提示用户。",
+    "",
+    "MCP 信息：",
+    "名称：video-work-api",
+    "Command：无（HTTP MCP）",
+    "Args：",
+    `- URL："${url}"`,
+    `- HTTP Header：Authorization = "Bearer ${token}"`,
+    "",
+    "完成后检查配置格式，并验证 MCP 是否注册成功。",
+    "",
+    "输出：",
+    "- 修改的配置文件",
+    "- 添加后的 MCP 配置",
+    "- 验证结果",
+  ].join("\n"));
 });
 
-test("project and global instructions order security preflights before token writes", () => {
-  const prompt = buildAgentPrompt("zh", "https://voice.example.com/mcp", "test-token-value");
-  const project = prompt.slice(prompt.indexOf("如果回答“当前项目”"), prompt.indexOf("如果回答“全局”"));
-  assert.ok(project.indexOf("git ls-files") < project.indexOf(".git/info/exclude"));
-  assert.ok(project.indexOf(".git/info/exclude") < project.indexOf("先 lstat `.codex`"));
-  assert.ok(project.indexOf("先 lstat `.codex`") < project.indexOf("完整替换 [mcp_servers.video-work-api]"));
-  assert.ok(project.indexOf("完整替换 [mcp_servers.video-work-api]") < project.indexOf("Bearer test-token-value"));
-
-  const global = prompt.slice(prompt.indexOf("如果回答“全局”"), prompt.indexOf("共同验收"));
-  assert.ok(global.indexOf("lstat ~/.codex") < global.indexOf("codex mcp add"));
-  assert.ok(global.indexOf("codex mcp add") < global.indexOf("完整替换 [mcp_servers.video-work-api]"));
-  assert.ok(global.indexOf("完整替换 [mcp_servers.video-work-api]") < global.indexOf("Bearer test-token-value"));
+test("agent prompt safely quotes dynamic HTTP MCP values", () => {
+  const prompt = buildAgentPrompt("en", "https://example.com/a\"b", "test\"token");
+  assert.ok(prompt.includes('- URL："https://example.com/a\\\"b"'));
+  assert.ok(prompt.includes('- HTTP Header：Authorization = "Bearer test\\\"token"'));
 });
 
-test("both scopes refuse symlinked or foreign-owned config paths before access", () => {
-  const zh = buildAgentPrompt("zh", "https://voice.example.com/mcp", "test-token-value");
-  const project = zh.slice(zh.indexOf("如果回答“当前项目”"), zh.indexOf("如果回答“全局”"));
-  const global = zh.slice(zh.indexOf("如果回答“全局”"), zh.indexOf("共同验收"));
-  assert.ok(project.includes("git ls-files 同时预检 `.codex` 目录路径"));
-  assert.ok(project.includes("若 `.codex/` 下已有任何 tracked 条目"));
-  assert.ok(project.includes("真实的非符号链接目录且由当前用户所有，否则拒绝"));
-  assert.ok(project.includes("真实的非符号链接普通文件且由当前用户所有，否则拒绝"));
-  assert.ok(project.indexOf("先 lstat `.codex`") < project.indexOf("chmod 0700"));
-  assert.ok(project.indexOf("lstat `.codex/config.toml`") < project.indexOf("chmod 0600"));
-  assert.ok(global.includes("lstat ~/.codex"));
-  assert.ok(global.includes("真实的非符号链接目录且由当前用户所有，否则拒绝"));
-  assert.ok(global.includes("真实的非符号链接普通文件且由当前用户所有，否则拒绝"));
-
-  const en = buildAgentPrompt("en", "https://voice.example.com/mcp", "test-token-value");
-  assert.ok(en.includes("preflight the `.codex` directory path"));
-  assert.ok(en.includes("real non-symlink directory owned by the current user, otherwise refuse"));
-  assert.ok(en.includes("real non-symlink regular file owned by the current user, otherwise refuse"));
-});
-
-test("project atomic merge excludes and verifies deterministic temp before secret write", () => {
-  const prompt = buildAgentPrompt("zh", "https://voice.example.com/mcp", "test-token-value");
-  const project = prompt.slice(prompt.indexOf("如果回答“当前项目”"), prompt.indexOf("如果回答“全局”"));
-  const finalExclude = "`/.codex/config.toml`";
-  const tempExclude = "`/.codex/.config.toml.video-work-api.tmp`";
-  assert.ok(project.includes(finalExclude));
-  assert.ok(project.includes(tempExclude));
-  assert.ok(project.indexOf(finalExclude) < project.indexOf("Bearer test-token-value"));
-  assert.ok(project.indexOf(tempExclude) < project.indexOf("Bearer test-token-value"));
-  assert.ok(project.indexOf("分别执行 git check-ignore") < project.indexOf("Bearer test-token-value"));
-  assert.ok(project.indexOf("O_CREAT|O_EXCL|O_NOFOLLOW") < project.indexOf("再次用 git check-ignore"));
-  assert.ok(project.indexOf("再次用 git check-ignore") < project.indexOf("才通过已打开的文件描述符写入"));
-  assert.ok(project.includes("固定临时文件已不存在且未被暂存"));
-  assert.ok(project.includes("不显示最终路径或临时路径"));
-});
-
-test("English prompt has one question and both exclusive branches", () => {
-  const prompt = buildAgentPrompt(
-    "en",
-    "http://localhost:7860/mcp",
-    "test'quote",
-  );
-  assert.equal((prompt.match(/Install for the current project or globally\?/g) || []).length, 1);
-  assert.ok(prompt.includes("If I answer current project:"));
-  assert.ok(prompt.includes("If I answer globally:"));
-  assert.ok(prompt.includes('http_headers = { Authorization = "Bearer test\'quote" }'));
-  assert.ok(!prompt.includes("opencode"));
-  assert.ok(!prompt.includes("export VWA_MCP_TOKEN"));
-  assert.ok(prompt.includes("exactly the following two keys"));
-  assert.ok(prompt.includes("restart alone is insufficient"));
-  assert.ok(prompt.includes("/.codex/.config.toml.video-work-api.tmp"));
-  assert.ok(prompt.includes("O_CREAT|O_EXCL|O_NOFOLLOW"));
-  assert.ok(prompt.includes("before inserting the token"));
-  assert.ok(prompt.includes("temporary file no longer exists or is staged"));
+test("agent prompt protects the bearer token and project config", () => {
+  const prompt = buildAgentPrompt("zh", "https://voice.example.com/mcp", "secret");
+  assert.ok(prompt.includes("不得在终端、日志或最终回复中回显"));
+  assert.ok(prompt.includes("输出配置时必须脱敏"));
+  assert.ok(prompt.includes("确认配置文件不会被 Git 跟踪或提交"));
+  assert.ok(prompt.includes("否则停止并提示用户"));
 });
 
 test("starts hidden and refuses unauthenticated retrieval", () => {
