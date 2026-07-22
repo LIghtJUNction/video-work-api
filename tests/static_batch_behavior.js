@@ -2,9 +2,30 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   parseNonEmptyLines,
+  parseWholeTextItem,
   validateItems,
   runSequential,
 } = require("../static/batch-core.js");
+
+test("treats a 21-line textarea as one whole generation item", () => {
+  const text = Array.from({ length: 21 }, (_, index) => `第 ${index + 1} 行`).join("\n");
+  assert.deepEqual(parseWholeTextItem(`  \n${text}\n  `), [text]);
+});
+
+test("returns no whole generation item for whitespace-only input", () => {
+  assert.deepEqual(parseWholeTextItem(" \n\t\n "), []);
+});
+
+test("validates the whole generation item at the 1200-character boundary", () => {
+  const accepted = parseWholeTextItem("中".repeat(1200));
+  const rejected = parseWholeTextItem("中".repeat(1201));
+  assert.equal(validateItems(accepted, { maxItems: 50, maxChars: 1200 }), null);
+  assert.deepEqual(validateItems(rejected, { maxItems: 50, maxChars: 1200 }), {
+    type: "too_long",
+    index: 0,
+    count: 1201,
+  });
+});
 
 test("counts Chinese text by characters at the 1200 boundary", () => {
   const accepted = parseNonEmptyLines("中".repeat(1200));

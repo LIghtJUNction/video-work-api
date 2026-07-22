@@ -311,6 +311,23 @@ button:disabled { opacity: .5; cursor: wait; transform: none; box-shadow: none; 
 :focus-visible { outline: 3px solid var(--clay); outline-offset: 2px; }
 .compact { padding: 8px 12px; font-size: .8rem; }
 
+.segmented {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(7.5rem, .32fr);
+}
+.segmented > button {
+  min-width: 0;
+  border-radius: 0;
+}
+.segmented > button:first-child { border-radius: 10px 0 0 10px; }
+.segmented > button:last-child {
+  margin-left: -1.5px;
+  border-radius: 0 10px 10px 0;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+.segmented > button:focus-visible { position: relative; z-index: 1; }
+
 #themeToggle { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border-radius: 50% 46% 52% 48% / 48% 52% 46% 54%; }
 #themeToggle svg { width: 16px; height: 16px; }
 [data-theme="light"] .icon-sun, [data-theme="dark"] .icon-moon { display: none; }

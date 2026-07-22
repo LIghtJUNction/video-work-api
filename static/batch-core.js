@@ -16,6 +16,11 @@
       .filter(Boolean);
   }
 
+  function parseWholeTextItem(value) {
+    const text = String(value || "").trim();
+    return text ? [text] : [];
+  }
+
   function validateItems(items, options) {
     const values = Array.from(items || []);
     if (!values.length) return { type: "empty" };
@@ -67,5 +72,11 @@
     return items;
   }
 
-  return { characterCount, parseNonEmptyLines, validateItems, runSequential };
+  return {
+    characterCount,
+    parseNonEmptyLines,
+    parseWholeTextItem,
+    validateItems,
+    runSequential,
+  };
 });

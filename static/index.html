@@ -6,7 +6,7 @@
   <script>try{document.documentElement.dataset.theme=localStorage.getItem("vwa-theme")||"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
   <title>Video Work API · 视频工作 API</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260721d">
-  <link rel="stylesheet" href="/static/styles.css?v=20260722c">
+  <link rel="stylesheet" href="/static/styles.css?v=20260722d">
   <script src="/static/theme.js?v=20260721" defer></script>
 </head>
 <body>
@@ -86,11 +86,14 @@
       <section class="card generate">
         <div class="section-heading"><div><p class="eyebrow" data-i18n="generateEyebrow">GENERATE</p><h2 data-i18n="generateTitle">生成语音</h2><p class="section-lead" data-i18n="generateLead">选择音色，输入文案，马上试听结果。</p></div><span class="section-number">01</span></div>
         <form id="generateForm">
-          <label><span data-i18n="voiceStyle">说话人 / 语气</span><select id="profileSelect" required></select></label>
-          <label><span data-i18n="targetText">目标文案（每个非空行一条）</span><textarea id="targetText" name="target_text" rows="7" required aria-describedby="generationCount generationError"></textarea></label>
+          <label><span data-i18n="voiceStyle">说话人 / 语气</span><select id="profileSelect" required aria-errormessage="generationError"></select></label>
+          <label><span data-i18n="targetText">目标文案（每个非空行一条）</span><textarea id="targetText" name="target_text" rows="7" required aria-describedby="generationCount" aria-errormessage="generationError"></textarea></label>
           <div class="batch-toolbar"><span id="generationCount" class="batch-count"></span><span id="generationError" class="field-error" role="alert"></span></div>
           <label><span><span data-i18n="speed">语速</span> <output id="speedValue">1.00×</output></span><input id="speed" name="speed" type="range" min="0.75" max="1.25" step="0.05" value="1"></label>
-          <button id="generateButton">生成 0 条</button>
+          <div class="segmented generation-actions">
+            <button id="generateButton">生成 0 条</button>
+            <button id="generateSingleButton" class="secondary" type="button" data-i18n="generateSingleButton">仅生成一条</button>
+          </div>
         </form>
         <div id="generationBatch" class="batch-results hidden">
           <div class="batch-progress"><span id="generationProgressText" role="status" aria-live="polite" aria-atomic="true"></span><progress id="generationProgress" max="1" value="0"></progress><button id="retryGenerationFailures" type="button" class="secondary compact hidden"></button></div>
@@ -158,8 +161,8 @@
       </form>
     </article>
   </template>
-  <script src="/static/batch-core.js?v=20260722c"></script>
+  <script src="/static/batch-core.js?v=20260722d"></script>
   <script src="/static/agent-prompt.js?v=20260722-1"></script>
-  <script src="/static/app.js?v=20260722d"></script>
+  <script src="/static/app.js?v=20260722f"></script>
 </body>
 </html>

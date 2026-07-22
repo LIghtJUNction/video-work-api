@@ -46,11 +46,13 @@ const translations = {
     targetText: "目标文案（每个非空行一条）",
     speed: "语速",
     generateButton: "生成音频",
+    generateSingleButton: "仅生成一条",
     download: "下载 WAV",
     resultReady: "生成完成",
     itemCount: "{count} 条 · 共 {chars} 字符",
     generateItems: "生成 {count} 条",
     emptyGeneration: "请至少输入一条非空文案。",
+    profileRequired: "请先选择说话人 / 语气。",
     tooManyItems: "一次最多处理 50 条。",
     textTooLong: "第 {index} 条超过 1200 字符（当前 {chars}）。",
     batchProgress: "完成 {done} / {total} · 失败 {failed}",
@@ -154,11 +156,13 @@ const translations = {
     targetText: "Target text (one non-empty line per item)",
     speed: "Speed",
     generateButton: "Generate audio",
+    generateSingleButton: "Generate one",
     download: "Download WAV",
     resultReady: "Generation complete",
     itemCount: "{count} items · {chars} characters total",
     generateItems: "Generate {count} items",
     emptyGeneration: "Enter at least one non-empty line.",
+    profileRequired: "Select a speaker / style first.",
     tooManyItems: "A batch can contain at most 50 items.",
     textTooLong: "Item {index} exceeds 1,200 characters ({chars}).",
     batchProgress: "Completed {done} / {total} · Failed {failed}",
@@ -258,6 +262,7 @@ let logoutInProgress = false;
 const {
   characterCount,
   parseNonEmptyLines,
+  parseWholeTextItem,
   validateItems,
   runSequential,
 } = window.BatchCore;
@@ -1330,7 +1335,13 @@ function updateBatchProgress(kind, jobs) {
 }
 
 function setGenerationControlsDisabled(disabled) {
-  [$("#profileSelect"), $("#targetText"), $("#speed"), $("#generateButton")].forEach((node) => {
+  [
+    $("#profileSelect"),
+    $("#targetText"),
+    $("#speed"),
+    $("#generateButton"),
+    $("#generateSingleButton"),
+  ].forEach((node) => {
     if (node) node.disabled = disabled;
   });
   document.querySelectorAll("#generationJobs .retry-item").forEach((node) => {
@@ -1357,6 +1368,17 @@ function generationValidation(lines = parseNonEmptyLines($("#targetText")?.value
   });
 }
 
+function setGenerationError(message, field = "text") {
+  const input = $("#targetText");
+  const profile = $("#profileSelect");
+  const error = $("#generationError");
+  if (error) error.textContent = message;
+  if (input) input.setAttribute("aria-invalid", "false");
+  if (profile) profile.setAttribute("aria-invalid", "false");
+  const invalid = field === "profile" ? profile : input;
+  if (message && invalid) invalid.setAttribute("aria-invalid", "true");
+}
+
 function syncGenerationInput() {
   const input = $("#targetText");
   const count = $("#generationCount");
@@ -1367,8 +1389,7 @@ function syncGenerationInput() {
   const chars = lines.reduce((sum, line) => sum + characterCount(line), 0);
   count.textContent = tf("itemCount", { count: lines.length, chars });
   const validation = generationValidation(lines);
-  error.textContent = validation;
-  input.setAttribute("aria-invalid", String(Boolean(validation)));
+  setGenerationError(validation, "text");
   button.textContent = tf("generateItems", { count: lines.length });
 }
 
@@ -1450,37 +1471,51 @@ async function runGenerationJobs(jobs) {
   updateBatchProgress("generation", generationJobs);
 }
 
+async function startGeneration(items) {
+  if (generationRunning || logoutInProgress) return;
+  const error = generationValidation(items);
+  if (error) {
+    setGenerationError(error, "text");
+    return;
+  }
+  const profile = $("#profileSelect")?.value;
+  if (!profile) {
+    setGenerationError(t("profileRequired"), "profile");
+    return;
+  }
+  const [speaker_id, profile_id] = profile.split("|");
+  const speedSnapshot = Number($("#speed")?.value || 1);
+  setGenerationError("");
+  generationEpoch += 1;
+  generationJobs = items.map((text) => ({
+    text,
+    status: "pending",
+    error: "",
+    result: null,
+    request: { speaker_id, profile_id, target_text: text, speed: speedSnapshot },
+  }));
+  renderGenerationJobs();
+  notice("");
+  await runGenerationJobs(generationJobs);
+}
+
 const targetText = $("#targetText");
 if (targetText) targetText.addEventListener("input", syncGenerationInput);
+const profileSelect = $("#profileSelect");
+if (profileSelect) profileSelect.addEventListener("change", syncGenerationInput);
 
 const generateForm = $("#generateForm");
 if (generateForm) {
   generateForm.onsubmit = async (event) => {
     event.preventDefault();
-    if (generationRunning || logoutInProgress) return;
-    const lines = parseNonEmptyLines($("#targetText")?.value);
-    const error = generationValidation(lines);
-    syncGenerationInput();
-    if (error) return;
-    const profile = $("#profileSelect")?.value;
-    if (!profile) {
-      notice(t("failed"));
-      return;
-    }
-    const [speaker_id, profile_id] = profile.split("|");
-    const speedSnapshot = Number($("#speed")?.value || 1);
-    generationEpoch += 1;
-    generationJobs = lines.map((text) => ({
-      text,
-      status: "pending",
-      error: "",
-      result: null,
-      request: { speaker_id, profile_id, target_text: text, speed: speedSnapshot },
-    }));
-    renderGenerationJobs();
-    notice("");
-    await runGenerationJobs(generationJobs);
+    await startGeneration(parseNonEmptyLines($("#targetText")?.value));
   };
+}
+
+const generateSingleButton = $("#generateSingleButton");
+if (generateSingleButton) {
+  generateSingleButton.onclick = () =>
+    startGeneration(parseWholeTextItem($("#targetText")?.value));
 }
 
 const retryGenerationFailures = $("#retryGenerationFailures");
