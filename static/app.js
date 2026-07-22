@@ -263,6 +263,7 @@ const {
   characterCount,
   parseNonEmptyLines,
   parseWholeTextItem,
+  shouldShowSingleGenerationAction,
   validateItems,
   runSequential,
 } = window.BatchCore;
@@ -1384,6 +1385,7 @@ function syncGenerationInput() {
   const count = $("#generationCount");
   const error = $("#generationError");
   const button = $("#generateButton");
+  const singleButton = $("#generateSingleButton");
   if (!input || !count || !error || !button) return;
   const lines = parseNonEmptyLines(input.value);
   const chars = lines.reduce((sum, line) => sum + characterCount(line), 0);
@@ -1391,6 +1393,12 @@ function syncGenerationInput() {
   const validation = generationValidation(lines);
   setGenerationError(validation, "text");
   button.textContent = tf("generateItems", { count: lines.length });
+  if (singleButton) {
+    singleButton.classList.toggle(
+      "hidden",
+      !shouldShowSingleGenerationAction(lines.length),
+    );
+  }
 }
 
 function updateGenerationJob(job) {
