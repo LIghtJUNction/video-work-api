@@ -7,6 +7,7 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
@@ -683,9 +684,11 @@ async fn cmd_serve(mut settings: Settings) -> Result<()> {
         settings.model_dir.clone(),
         &settings.project_root,
     ));
-    let subtitles: Arc<dyn SubtitleExtractor> = Arc::new(FunClipExtractor::new(
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let subtitles: Arc<dyn SubtitleExtractor> = Arc::new(FunClipExtractor::with_cancellation(
         settings.funclip_root.clone(),
         settings.subtitle_timeout_seconds,
+        cancellation.clone(),
     ));
     let host = settings.host.clone();
     let port = settings.port;
@@ -706,7 +709,120 @@ async fn cmd_serve(mut settings: Settings) -> Result<()> {
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal(cancellation))
     .await
     .context("serve")?;
     Ok(())
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum ShutdownTransition {
+    BeginGraceful,
+    ForceExit,
+}
+
+fn advance_shutdown(cancellation: &AtomicBool) -> ShutdownTransition {
+    if cancellation.swap(true, Ordering::AcqRel) {
+        ShutdownTransition::ForceExit
+    } else {
+        ShutdownTransition::BeginGraceful
+    }
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+enum ShutdownSignal {
+    Interrupt,
+    Terminate,
+}
+
+#[cfg(unix)]
+impl ShutdownSignal {
+    fn exit_code(self) -> i32 {
+        match self {
+            Self::Interrupt => 130,
+            Self::Terminate => 143,
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn next_shutdown_signal(
+    interrupt: &mut tokio::signal::unix::Signal,
+    terminate: &mut tokio::signal::unix::Signal,
+) -> ShutdownSignal {
+    tokio::select! {
+        _ = interrupt.recv() => ShutdownSignal::Interrupt,
+        _ = terminate.recv() => ShutdownSignal::Terminate,
+    }
+}
+
+async fn shutdown_signal(cancellation: Arc<AtomicBool>) {
+    #[cfg(unix)]
+    {
+        let mut interrupt =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()) {
+                Ok(signal) => signal,
+                Err(error) => {
+                    tracing::error!(%error, "install SIGINT handler");
+                    return;
+                }
+            };
+        let mut terminate =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(signal) => signal,
+                Err(error) => {
+                    tracing::error!(%error, "install SIGTERM handler");
+                    return;
+                }
+            };
+
+        let first = next_shutdown_signal(&mut interrupt, &mut terminate).await;
+        let transition = advance_shutdown(&cancellation);
+        debug_assert_eq!(transition, ShutdownTransition::BeginGraceful);
+        tracing::info!(signal = first.exit_code() - 128, "begin graceful shutdown");
+
+        tokio::spawn(async move {
+            let second = next_shutdown_signal(&mut interrupt, &mut terminate).await;
+            if advance_shutdown(&cancellation) == ShutdownTransition::ForceExit {
+                std::process::exit(second.exit_code());
+            }
+        });
+    }
+
+    #[cfg(not(unix))]
+    match tokio::signal::ctrl_c().await {
+        Ok(()) => {
+            let transition = advance_shutdown(&cancellation);
+            debug_assert_eq!(transition, ShutdownTransition::BeginGraceful);
+            tokio::spawn(async move {
+                if tokio::signal::ctrl_c().await.is_ok()
+                    && advance_shutdown(&cancellation) == ShutdownTransition::ForceExit
+                {
+                    std::process::exit(130);
+                }
+            });
+        }
+        Err(error) => tracing::error!(%error, "listen for Ctrl-C"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_shutdown_signal_cancels_work_and_second_forces_exit() {
+        let cancellation = AtomicBool::new(false);
+
+        assert_eq!(
+            advance_shutdown(&cancellation),
+            ShutdownTransition::BeginGraceful
+        );
+        assert!(cancellation.load(Ordering::Acquire));
+        assert_eq!(
+            advance_shutdown(&cancellation),
+            ShutdownTransition::ForceExit
+        );
+    }
 }

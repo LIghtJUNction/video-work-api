@@ -21,9 +21,7 @@ fn batch_workspaces_expose_queue_structure() {
         assert!(INDEX.contains(&format!("id=\"{id}\"")), "missing #{id}");
     }
     assert!(INDEX.contains("name=\"video\" type=\"file\" multiple"));
-    assert!(INDEX.contains(
-        "id=\"profileSelect\" required aria-errormessage=\"generationError\""
-    ));
+    assert!(INDEX.contains("id=\"profileSelect\" required aria-errormessage=\"generationError\""));
     assert!(INDEX.contains(
         "id=\"targetText\" name=\"target_text\" rows=\"7\" required aria-describedby=\"generationCount\" aria-errormessage=\"generationError\""
     ));

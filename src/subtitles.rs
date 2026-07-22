@@ -1,6 +1,11 @@
+use std::collections::VecDeque;
 use std::fs;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -68,10 +73,124 @@ pub struct FunClipExtractor {
     root: Option<PathBuf>,
     timeout: Duration,
     python: PathBuf,
+    cancellation: Arc<AtomicBool>,
+}
+
+const MAX_FUNCLIP_STDERR_BYTES: usize = 16 * 1024;
+
+struct CapturedStderr {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+enum FunClipWaitOutcome {
+    Exited(ExitStatus),
+    Cancelled,
+    TimedOut,
+    WaitFailed(io::Error),
+}
+
+fn drain_funclip_stderr(mut stderr: ChildStderr) -> io::Result<CapturedStderr> {
+    let mut tail = VecDeque::with_capacity(MAX_FUNCLIP_STDERR_BYTES);
+    let mut total_bytes = 0usize;
+    let mut buffer = [0u8; 8192];
+    loop {
+        let bytes_read = stderr.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        total_bytes = total_bytes.saturating_add(bytes_read);
+        if bytes_read >= MAX_FUNCLIP_STDERR_BYTES {
+            tail.clear();
+            tail.extend(&buffer[bytes_read - MAX_FUNCLIP_STDERR_BYTES..bytes_read]);
+        } else {
+            let overflow = tail
+                .len()
+                .saturating_add(bytes_read)
+                .saturating_sub(MAX_FUNCLIP_STDERR_BYTES);
+            if overflow > 0 {
+                tail.drain(..overflow);
+            }
+            tail.extend(&buffer[..bytes_read]);
+        }
+    }
+    Ok(CapturedStderr {
+        bytes: tail.into_iter().collect(),
+        truncated: total_bytes > MAX_FUNCLIP_STDERR_BYTES,
+    })
+}
+
+fn join_funclip_stderr(reader: JoinHandle<io::Result<CapturedStderr>>) -> String {
+    match reader.join() {
+        Ok(Ok(stderr)) => stderr_context(&stderr),
+        Ok(Err(error)) => format!("read FunClip stderr: {error}"),
+        Err(_) => "join FunClip stderr reader: thread panicked".to_string(),
+    }
+}
+
+fn stderr_context(stderr: &CapturedStderr) -> String {
+    let content = String::from_utf8_lossy(&stderr.bytes);
+    let content = content.trim();
+    let prefix = if stderr.truncated {
+        "FunClip stderr (truncated to last 16384 bytes)"
+    } else {
+        "FunClip stderr"
+    };
+    if content.is_empty() {
+        format!("{prefix}: <empty>")
+    } else {
+        format!("{prefix}: {content}")
+    }
+}
+
+#[cfg(unix)]
+fn kill_funclip_process_group(child: &Child) -> Option<String> {
+    let process_group = child.id() as i32;
+    // SAFETY: the child was spawned into a process group whose ID is its positive PID.
+    if unsafe { libc::killpg(process_group, libc::SIGKILL) } == -1 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Some(format!("kill FunClip process group: {error}"));
+        }
+    }
+    None
+}
+
+fn sweep_funclip_descendants(child: &Child) {
+    #[cfg(unix)]
+    if let Some(error) = kill_funclip_process_group(child) {
+        tracing::warn!(%error, "sweep FunClip descendants after main process exit");
+    }
+}
+
+fn terminate_funclip(child: &mut Child) -> Vec<String> {
+    let mut errors = Vec::new();
+
+    #[cfg(unix)]
+    if let Some(error) = kill_funclip_process_group(child) {
+        errors.push(error);
+    }
+    #[cfg(not(unix))]
+    if let Err(error) = child.kill() {
+        errors.push(format!("kill FunClip: {error}"));
+    }
+
+    if let Err(error) = child.wait() {
+        errors.push(format!("wait after killing FunClip: {error}"));
+    }
+    errors
 }
 
 impl FunClipExtractor {
     pub fn new(root: Option<PathBuf>, timeout_seconds: u64) -> Self {
+        Self::with_cancellation(root, timeout_seconds, Arc::new(AtomicBool::new(false)))
+    }
+
+    pub fn with_cancellation(
+        root: Option<PathBuf>,
+        timeout_seconds: u64,
+        cancellation: Arc<AtomicBool>,
+    ) -> Self {
         let python = std::env::var_os("VWA_PYTHON")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("python3"));
@@ -79,6 +198,7 @@ impl FunClipExtractor {
             root,
             timeout: Duration::from_secs(timeout_seconds),
             python,
+            cancellation,
         }
     }
 
@@ -103,43 +223,74 @@ impl SubtitleExtractor for FunClipExtractor {
             .videoclipper()
             .context("FunClip is not installed; set VWA_FUNCLIP_ROOT")?;
         let temp = tempfile::tempdir_in(std::env::temp_dir()).context("temp dir")?;
-        // Note: we rely on process-level kill via wait_timeout-like behavior.
-        // tokio is used at the HTTP layer; this path is blocking on a worker.
         let output_dir = temp.path();
-        let mut child = Command::new(&self.python)
-            .arg(&script)
-            .args([
-                "--stage",
-                "1",
-                "--file",
-                video_path.to_str().context("video path")?,
-                "--output_dir",
-                output_dir.to_str().context("output dir")?,
-            ])
+        let mut command = Command::new(&self.python);
+        command.arg(&script).args([
+            "--stage",
+            "1",
+            "--file",
+            video_path.to_str().context("video path")?,
+            "--output_dir",
+            output_dir.to_str().context("output dir")?,
+        ]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command
             .current_dir(root)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .context("spawn FunClip")?;
+        let stderr = child.stderr.take().context("capture FunClip stderr")?;
+        let stderr_reader = std::thread::spawn(move || drain_funclip_stderr(stderr));
 
         let start = std::time::Instant::now();
-        loop {
+        let outcome = loop {
             match child.try_wait() {
-                Ok(Some(status)) => {
-                    if !status.success() {
-                        bail!("FunClip subtitle extraction failed");
-                    }
-                    break;
-                }
+                Ok(Some(status)) => break FunClipWaitOutcome::Exited(status),
                 Ok(None) => {
+                    if self.cancellation.load(Ordering::Acquire) {
+                        break FunClipWaitOutcome::Cancelled;
+                    }
                     if start.elapsed() > self.timeout {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        bail!("FunClip subtitle extraction timed out");
+                        break FunClipWaitOutcome::TimedOut;
                     }
                     std::thread::sleep(Duration::from_millis(100));
                 }
-                Err(e) => bail!("wait FunClip: {e}"),
+                Err(error) => break FunClipWaitOutcome::WaitFailed(error),
+            }
+        };
+        let cleanup_errors = match &outcome {
+            FunClipWaitOutcome::Exited(_) => {
+                sweep_funclip_descendants(&child);
+                Vec::new()
+            }
+            FunClipWaitOutcome::Cancelled
+            | FunClipWaitOutcome::TimedOut
+            | FunClipWaitOutcome::WaitFailed(_) => terminate_funclip(&mut child),
+        };
+        let stderr = join_funclip_stderr(stderr_reader);
+        let cleanup = if cleanup_errors.is_empty() {
+            String::new()
+        } else {
+            format!("; cleanup errors: {}", cleanup_errors.join("; "))
+        };
+        match outcome {
+            FunClipWaitOutcome::Exited(status) if status.success() => {}
+            FunClipWaitOutcome::Exited(_) => {
+                bail!("FunClip subtitle extraction failed; {stderr}{cleanup}")
+            }
+            FunClipWaitOutcome::Cancelled => {
+                bail!("FunClip subtitle extraction cancelled during service shutdown; {stderr}{cleanup}")
+            }
+            FunClipWaitOutcome::TimedOut => {
+                bail!("FunClip subtitle extraction timed out; {stderr}{cleanup}")
+            }
+            FunClipWaitOutcome::WaitFailed(error) => {
+                bail!("wait FunClip: {error}; {stderr}{cleanup}")
             }
         }
 
@@ -202,6 +353,34 @@ impl SubtitleExtractor for FakeSubtitles {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn process_terminated(pid: i32) -> bool {
+        // SAFETY: signal 0 only probes a positive PID written by the test helper.
+        if unsafe { libc::kill(pid, 0) } == -1
+            && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+        {
+            return true;
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let stat = fs::read_to_string(format!("/proc/{pid}/stat"));
+            match stat {
+                Ok(stat) => {
+                    stat.rsplit_once(") ")
+                        .and_then(|(_, fields)| fields.chars().next())
+                        == Some('Z')
+                }
+                Err(error) => error.kind() == io::ErrorKind::NotFound,
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
+    }
+
     #[test]
     fn parse_basic_srt() {
         let srt = "1\n00:00:00,000 --> 00:00:01,500\nhello world\n\n2\n00:00:01.500 --> 00:00:02.000\nhi\n";
@@ -209,5 +388,216 @@ mod tests {
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[0].start, "00:00:00.000");
         assert_eq!(segs[1].text, "hi");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn funclip_extract_succeeds_when_stderr_exceeds_pipe_capacity() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let funclip_dir = temp.path().join("funclip");
+        fs::create_dir(&funclip_dir).expect("funclip dir");
+        let helper = funclip_dir.join("videoclipper.py");
+        fs::write(
+            &helper,
+            r#"output_dir=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--output_dir' ]; then
+    output_dir=$2
+    shift 2
+  else
+    shift
+  fi
+done
+head -c 1048576 /dev/zero >&2
+cat > "$output_dir/total.srt" <<'EOF'
+1
+00:00:00,000 --> 00:00:01,500
+hello world
+EOF
+"#,
+        )
+        .expect("write helper");
+        let video = temp.path().join("video.mp4");
+        fs::write(&video, []).expect("write video");
+        let extractor = FunClipExtractor {
+            root: Some(temp.path().to_path_buf()),
+            timeout: Duration::from_secs(1),
+            python: PathBuf::from("/bin/sh"),
+            cancellation: Arc::new(AtomicBool::new(false)),
+        };
+
+        let (segments, _) = extractor.extract(&video).expect("extract subtitles");
+
+        assert_eq!(segments[0].text, "hello world");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn funclip_timeout_kills_descendants_that_inherit_stderr() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let funclip_dir = temp.path().join("funclip");
+        fs::create_dir(&funclip_dir).expect("funclip dir");
+        let helper = funclip_dir.join("videoclipper.py");
+        fs::write(
+            &helper,
+            r#"video=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--file' ]; then
+    video=$2
+    shift 2
+  else
+    shift
+  fi
+done
+(sleep 3) &
+printf '%s\n' "$!" > "$video.descendant.pid"
+wait
+"#,
+        )
+        .expect("write helper");
+        let video = temp.path().join("video.mp4");
+        fs::write(&video, []).expect("write video");
+        let extractor = FunClipExtractor {
+            root: Some(temp.path().to_path_buf()),
+            timeout: Duration::from_millis(100),
+            python: PathBuf::from("/bin/sh"),
+            cancellation: Arc::new(AtomicBool::new(false)),
+        };
+
+        let start = std::time::Instant::now();
+        let result = extractor.extract(&video);
+        let elapsed = start.elapsed();
+        let pid: i32 = fs::read_to_string(video.with_extension("mp4.descendant.pid"))
+            .expect("read descendant pid")
+            .trim()
+            .parse()
+            .expect("parse descendant pid");
+        let descendant_terminated = (0..20).any(|_| {
+            let terminated = process_terminated(pid);
+            if !terminated {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            terminated
+        });
+
+        assert!(
+            result.is_err() && elapsed < Duration::from_secs(1) && descendant_terminated,
+            "result={result:?}, elapsed={elapsed:?}, descendant_terminated={descendant_terminated}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn funclip_success_sweeps_descendant_that_inherits_stderr() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let funclip_dir = temp.path().join("funclip");
+        fs::create_dir(&funclip_dir).expect("funclip dir");
+        let helper = funclip_dir.join("videoclipper.py");
+        fs::write(
+            &helper,
+            r#"video=''
+output_dir=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --file) video=$2; shift 2 ;;
+    --output_dir) output_dir=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+(sleep 3) >&2 &
+printf '%s\n' "$!" > "$video.descendant.pid"
+cat > "$output_dir/total.srt" <<'EOF'
+1
+00:00:00,000 --> 00:00:01,500
+hello world
+EOF
+"#,
+        )
+        .expect("write helper");
+        let video = temp.path().join("video.mp4");
+        fs::write(&video, []).expect("write video");
+        let extractor = FunClipExtractor {
+            root: Some(temp.path().to_path_buf()),
+            timeout: Duration::from_secs(2),
+            python: PathBuf::from("/bin/sh"),
+            cancellation: Arc::new(AtomicBool::new(false)),
+        };
+
+        let start = std::time::Instant::now();
+        let result = extractor.extract(&video);
+        let elapsed = start.elapsed();
+        let pid: i32 = fs::read_to_string(video.with_extension("mp4.descendant.pid"))
+            .expect("read descendant pid")
+            .trim()
+            .parse()
+            .expect("parse descendant pid");
+
+        assert!(result.is_ok(), "result={result:?}");
+        assert!(elapsed < Duration::from_secs(1), "elapsed={elapsed:?}");
+        assert!(process_terminated(pid), "descendant {pid} still running");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn funclip_cancellation_terminates_active_process_group() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let funclip_dir = temp.path().join("funclip");
+        fs::create_dir(&funclip_dir).expect("funclip dir");
+        let helper = funclip_dir.join("videoclipper.py");
+        fs::write(
+            &helper,
+            r#"video=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--file' ]; then
+    video=$2
+    shift 2
+  else
+    shift
+  fi
+done
+touch "$video.started"
+sleep 3
+"#,
+        )
+        .expect("write helper");
+        let video = temp.path().join("video.mp4");
+        fs::write(&video, []).expect("write video");
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let extractor = FunClipExtractor {
+            root: Some(temp.path().to_path_buf()),
+            timeout: Duration::from_secs(5),
+            python: PathBuf::from("/bin/sh"),
+            cancellation: cancellation.clone(),
+        };
+        let video_for_extract = video.clone();
+        let worker = std::thread::spawn(move || extractor.extract(&video_for_extract));
+        let started = (0..40).any(|_| {
+            if video.with_extension("mp4.started").is_file() {
+                true
+            } else {
+                std::thread::sleep(Duration::from_millis(25));
+                false
+            }
+        });
+        assert!(started, "FunClip helper did not start");
+
+        let cancel_started = std::time::Instant::now();
+        cancellation.store(true, Ordering::Release);
+        let error = worker
+            .join()
+            .expect("join extraction")
+            .expect_err("cancellation should fail extraction");
+
+        assert!(
+            cancel_started.elapsed() < Duration::from_secs(1),
+            "elapsed={:?}",
+            cancel_started.elapsed()
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("cancelled during service shutdown"),
+            "error={error:#}"
+        );
     }
 }
