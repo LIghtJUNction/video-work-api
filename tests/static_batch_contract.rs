@@ -30,7 +30,7 @@ fn batch_workspaces_expose_queue_structure() {
     assert!(!INDEX.contains("aria-describedby=\"generationError\""));
     assert!(!INDEX.contains("aria-describedby=\"generationCount generationError\""));
     assert!(INDEX.contains("class=\"segmented generation-actions\""));
-    assert!(INDEX.contains("id=\"generateSingleButton\" class=\"secondary\" type=\"button\" data-i18n=\"generateSingleButton\""));
+    assert!(INDEX.contains("id=\"generateSingleButton\" class=\"secondary hidden\" type=\"button\" data-i18n=\"generateSingleButton\""));
     assert!(!INDEX.contains("id=\"generationBatch\" class=\"batch-results hidden\" aria-live"));
     assert!(!INDEX.contains("id=\"subtitleBatch\" class=\"batch-results hidden\" aria-live"));
     assert_eq!(
@@ -43,9 +43,9 @@ fn batch_workspaces_expose_queue_structure() {
 
 #[test]
 fn batch_assets_are_loaded_in_order_with_matching_versions() {
-    let core = INDEX.find("/static/batch-core.js?v=20260722d").unwrap();
+    let core = INDEX.find("/static/batch-core.js?v=20260722e").unwrap();
     let prompt = INDEX.find("/static/agent-prompt.js?v=20260722-1").unwrap();
-    let app = INDEX.find("/static/app.js?v=20260722f").unwrap();
+    let app = INDEX.find("/static/app.js?v=20260722g").unwrap();
     assert!(core < prompt && prompt < app);
     assert!(INDEX.contains("/static/styles.css?v=20260722d"));
 }
@@ -55,6 +55,8 @@ fn generation_paths_share_validation_and_locking_contracts() {
     assert!(APP.contains("await startGeneration(parseNonEmptyLines($(\"#targetText\")?.value));"));
     assert!(APP.contains("startGeneration(parseWholeTextItem($(\"#targetText\")?.value));"));
     assert!(APP.contains("$(\"#generateButton\"),\n    $(\"#generateSingleButton\"),"));
+    assert!(APP.contains("shouldShowSingleGenerationAction,"));
+    assert!(APP.contains("!shouldShowSingleGenerationAction(lines.length),"));
     assert!(APP.contains("if (generationRunning || logoutInProgress) return;"));
 
     let run = APP.find("async function runGenerationJobs(jobs)").unwrap();

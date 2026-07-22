@@ -21,6 +21,10 @@
     return text ? [text] : [];
   }
 
+  function shouldShowSingleGenerationAction(itemCount) {
+    return itemCount > 1;
+  }
+
   function validateItems(items, options) {
     const values = Array.from(items || []);
     if (!values.length) return { type: "empty" };
@@ -76,6 +80,7 @@
     characterCount,
     parseNonEmptyLines,
     parseWholeTextItem,
+    shouldShowSingleGenerationAction,
     validateItems,
     runSequential,
   };

@@ -3,9 +3,17 @@ const assert = require("node:assert/strict");
 const {
   parseNonEmptyLines,
   parseWholeTextItem,
+  shouldShowSingleGenerationAction,
   validateItems,
   runSequential,
 } = require("../static/batch-core.js");
+
+test("shows the single-generation action only for multiple items", () => {
+  assert.equal(shouldShowSingleGenerationAction(0), false);
+  assert.equal(shouldShowSingleGenerationAction(1), false);
+  assert.equal(shouldShowSingleGenerationAction(2), true);
+  assert.equal(shouldShowSingleGenerationAction(50), true);
+});
 
 test("treats a 21-line textarea as one whole generation item", () => {
   const text = Array.from({ length: 21 }, (_, index) => `第 ${index + 1} 行`).join("\n");
