@@ -19,7 +19,8 @@ onnx==1.22.0
 onnxruntime-gpu==1.18.0; sys_platform == 'linux'
 onnxruntime==1.18.0; sys_platform == 'darwin' or sys_platform == 'win32'
 setuptools==80.10.2
-openai-whisper==20231117
+# Whisper pin must not cap triton below Torch 2.13's requirement (triton 3.x).
+openai-whisper==20250625
 protobuf>=4.25.0,<5
 pyarrow==23.0.1
 pydantic==2.7.0
@@ -27,7 +28,7 @@ pyworld==0.3.4
 rich==13.7.1
 soundfile==0.12.1
 torch==2.13.0
-torchaudio==2.3.1
+torchaudio==2.13.0
 transformers==5.5.0
 sentencepiece==0.2.0
 accelerate==1.6.0
