@@ -103,12 +103,80 @@ current trusted project's `.codex/config.toml` or global
 agent-readable reference audio under `VWA_REFERENCE_INPUT_DIR` for
 `add_voice_profile`.
 
+The public MCP surface is the single `video_editor` tool. Agents list projects,
+inspect their virtual trees, read and optimistically write `project.vpe`,
+validate the current revision, then queue and observe exports through actions
+on that tool. Project slugs and virtual paths are sandboxed; symlinks and parent
+components are rejected.
+
+The editor's media actions are persistent queued work.
+`extract_analysis_frames`, `analyze_safe_trims`, and `render_cover` share the
+single render worker, cancellation, timeout, process-group, and crash-recovery
+path. They use fixed FFmpeg/FFprobe without a shell and immutable snapshots.
+Sampling does not perform VLM analysis. Safe-trim analysis uses genuine
+caller-supplied word timestamps, or configured FunClip stage-1 token
+timestamps from the frozen input, and never interpolates them. Cover jobs bind
+the current revision, stable variant key, VariantSpec, and CoverSpec; the
+worker hash-checks and decodes both images. Pre-package accepts only
+authoritative succeeded cover job IDs. Phase validation is
+fail-closed, ordered
+pre-render to pre-package to acceptance, and revision-scoped; failed reports
+and signing-unavailable attempts do not consume the canonical PASS path.
+Cleanup and archival are dry-run by default, reject symlinks
+and arbitrary paths, and require explicit `dry_run: false` for changes.
+Cleanup never targets project `.tmp/`. Archival requires the preserved
+four-piece delivery, complete verified receipt chain, exact PASS-report
+bindings, and transactionally moves only VPE-declared source assets while
+leaving exports in place.
+Configure an existing private HMAC key through `VWA_RECEIPT_KEY_FILE`; if it is
+missing, receipt signing is unavailable and no substitute signature is made.
+
 ## systemd
 
 The service is `video-work-api.service`. Use `systemctl status`, then
 explicit `sudo systemctl start`, `stop`, or `restart`. Installation must not run
 `enable`. Read logs with `journalctl -u video-work-api.service` while
 avoiding output that contains private text or paths.
+
+The render queue is persistent FIFO with a database-enforced global limit of one
+running render and an exclusive worker lease. `video_editor` export snapshots a
+canonical EDL bound to project ID, revision, and document SHA-256. Source,
+subtitle, and watermark files are copied from verified regular descriptors
+into a private frozen bundle. The worker verifies Python and renderer hashes,
+renders all main tracks and variants, and performs an independent byte replay.
+All renderer outputs remain under the private job `attempt-1/` directory until
+verification has produced a durable publication intent. That intent binds the
+job, project, revision, document, attestation/report, and an ordered manifest
+of project-relative destinations with source size and SHA-256. Publication
+pins the private job and project directories, copies to a private temporary
+file, fsyncs it, uses a no-replace rename, and fsyncs the destination parent.
+Matching existing content is an idempotent success; a mismatch remains running
+and publication-blocked, stops further claims, and never removes or overwrites
+the existing export. Startup recovers publication intents before orphan
+renderers or new claims. A complete intent is forward-completed without
+rerendering; a stale attempt without an intent is removed before requeue.
+The publication-intent CAS and cancellation update are mutually exclusive:
+cancel first yields cleanup-pending with zero public files, while intent first
+rejects later cancellation and forward-completes publication.
+Success, trusted attestation, and cleanup-pending are committed together, and
+only then may cleanup remove the private attempt. This protocol applies to the
+cover pair and every video/report file.
+On graceful shutdown, a running
+renderer receives TERM, then KILL after a bounded wait; its process group is
+reaped and its job becomes terminal before the worker exits. A durable launch
+handshake covers crashes before the database PID write. With a persisted PID,
+recovery independently authenticates `/proc` starttime, process group, and the
+fixed wrapper/job cmdline, stores a durable recovery intent before signaling,
+then safely requeues. Ambiguity remains running and blocks claims. A new lease holder
+safely requeues interrupted jobs after an unclean restart only after matching
+the stored Linux PID plus `/proc` starttime and confirming that process group is
+gone. Ambiguous cleanup stops the worker. Queue order is a durable monotonic
+sequence. Legacy XRY database rows remain readable but fail closed when their
+historical official-path invariants cannot be established.
+Terminal transitions atomically set cleanup-pending. Startup and the worker
+loop complete descriptor-confined cleanup before any next claim and clear the
+flag only afterward; unsafe cleanup stops the worker. Frozen source/replay
+media are removed while queued/running inputs and all project exports remain.
 
 Installed paths are `/usr/lib/video-work-api`,
 `/etc/video-work-api/config.env`, and

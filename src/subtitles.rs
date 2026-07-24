@@ -12,6 +12,8 @@ use anyhow::{bail, Context, Result};
 use regex::Regex;
 use serde::Serialize;
 
+use crate::alignment::WordTimestamp;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SubtitleSegment {
     pub index: usize,
@@ -66,7 +68,10 @@ pub fn parse_srt(content: &str) -> Vec<SubtitleSegment> {
 
 pub trait SubtitleExtractor: Send + Sync {
     fn ready(&self) -> bool;
-    fn extract(&self, video_path: &Path) -> Result<(Vec<SubtitleSegment>, String)>;
+    fn extract(
+        &self,
+        video_path: &Path,
+    ) -> Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)>;
 }
 
 pub struct FunClipExtractor {
@@ -214,7 +219,10 @@ impl SubtitleExtractor for FunClipExtractor {
         self.videoclipper().is_some()
     }
 
-    fn extract(&self, video_path: &Path) -> Result<(Vec<SubtitleSegment>, String)> {
+    fn extract(
+        &self,
+        video_path: &Path,
+    ) -> Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
         let root = self
             .root
             .as_ref()
@@ -305,8 +313,55 @@ impl SubtitleExtractor for FunClipExtractor {
         if segments.is_empty() {
             bail!("FunClip produced an empty or invalid SRT file");
         }
-        Ok((segments, srt))
+        let words = parse_funclip_words(output_dir)?;
+        Ok((segments, srt, words))
     }
+}
+
+fn parse_funclip_words(output_dir: &Path) -> Result<Vec<WordTimestamp>> {
+    let raw_path = output_dir.join("recog_res_raw");
+    let timestamp_path = output_dir.join("timestamp");
+    if !raw_path.exists() && !timestamp_path.exists() {
+        return Ok(Vec::new());
+    }
+    if !raw_path.is_file() || !timestamp_path.is_file() {
+        bail!("FunClip word timestamp state is incomplete");
+    }
+    let raw = fs::read_to_string(raw_path).context("read FunClip raw recognition text")?;
+    let timestamp_literal =
+        fs::read_to_string(timestamp_path).context("read FunClip token timestamps")?;
+    // FunClip persists Python list/tuple literals. Timestamp payloads are
+    // numeric-only, so normalizing tuple delimiters gives serde a strict,
+    // non-executable parser while retaining compatibility with both forms.
+    let normalized = timestamp_literal.replace('(', "[").replace(')', "]");
+    let timestamps: Vec<[f64; 2]> =
+        serde_json::from_str(&normalized).context("parse FunClip token timestamps")?;
+    let token_re = Regex::new(r"[\p{Han}]|[\p{L}\p{N}_-]+").expect("token regex");
+    let tokens = token_re
+        .find_iter(&raw)
+        .map(|item| item.as_str().to_string())
+        .collect::<Vec<_>>();
+    if tokens.len() != timestamps.len() {
+        bail!(
+            "FunClip token/timestamp cardinality mismatch: {} tokens, {} timestamps",
+            tokens.len(),
+            timestamps.len()
+        );
+    }
+    let mut previous_end = 0.0;
+    tokens
+        .into_iter()
+        .zip(timestamps)
+        .map(|(word, [start_ms, end_ms])| {
+            let start = start_ms / 1000.0;
+            let end = end_ms / 1000.0;
+            if !start.is_finite() || !end.is_finite() || start < previous_end || end <= start {
+                bail!("FunClip token timestamps must be finite, positive, and monotonic");
+            }
+            previous_end = end;
+            Ok(WordTimestamp { word, start, end })
+        })
+        .collect()
 }
 
 fn collect_srt(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
@@ -337,7 +392,10 @@ impl SubtitleExtractor for FakeSubtitles {
         self.ready_flag
     }
 
-    fn extract(&self, _video_path: &Path) -> Result<(Vec<SubtitleSegment>, String)> {
+    fn extract(
+        &self,
+        _video_path: &Path,
+    ) -> Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
         let segments = vec![SubtitleSegment {
             index: 1,
             start: "00:00:00.000".into(),
@@ -345,7 +403,7 @@ impl SubtitleExtractor for FakeSubtitles {
             text: "hello world".into(),
         }];
         let srt = "1\n00:00:00,000 --> 00:00:01,500\nhello world\n".to_string();
-        Ok((segments, srt))
+        Ok((segments, srt, Vec::new()))
     }
 }
 
@@ -390,6 +448,49 @@ mod tests {
         assert_eq!(segs[1].text, "hi");
     }
 
+    #[test]
+    fn parses_genuine_funclip_token_timestamps_without_interpolation() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("recog_res_raw"), "你好 hello-world").unwrap();
+        fs::write(
+            temp.path().join("timestamp"),
+            "[(0, 120), (120, 260), (300, 700)]",
+        )
+        .unwrap();
+        let words = parse_funclip_words(temp.path()).unwrap();
+        assert_eq!(
+            words,
+            vec![
+                WordTimestamp {
+                    word: "你".into(),
+                    start: 0.0,
+                    end: 0.12,
+                },
+                WordTimestamp {
+                    word: "好".into(),
+                    start: 0.12,
+                    end: 0.26,
+                },
+                WordTimestamp {
+                    word: "hello-world".into(),
+                    start: 0.3,
+                    end: 0.7,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_funclip_token_timestamp_cardinality_mismatch() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("recog_res_raw"), "one two").unwrap();
+        fs::write(temp.path().join("timestamp"), "[[0, 100]]").unwrap();
+        assert!(parse_funclip_words(temp.path())
+            .unwrap_err()
+            .to_string()
+            .contains("cardinality mismatch"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn funclip_extract_succeeds_when_stderr_exceeds_pipe_capacity() {
@@ -426,7 +527,7 @@ EOF
             cancellation: Arc::new(AtomicBool::new(false)),
         };
 
-        let (segments, _) = extractor.extract(&video).expect("extract subtitles");
+        let (segments, _, _) = extractor.extract(&video).expect("extract subtitles");
 
         assert_eq!(segments[0].text, "hello world");
     }

@@ -21,7 +21,17 @@ pub struct Settings {
     pub funclip_root: Option<PathBuf>,
     pub video_input_dir: PathBuf,
     pub reference_input_dir: PathBuf,
+    pub video_projects_dir: PathBuf,
+    pub receipt_key_file: PathBuf,
     pub subtitle_timeout_seconds: u64,
+    pub xry_task_root: PathBuf,
+    pub xry_source_root: PathBuf,
+    pub xry_renderer: PathBuf,
+    pub xry_python: PathBuf,
+    pub render_timeout_seconds: u64,
+    pub video_project_renderer: PathBuf,
+    pub video_project_python: PathBuf,
+    pub video_project_render_timeout_seconds: u64,
     pub project_root: PathBuf,
 }
 
@@ -69,6 +79,34 @@ impl Settings {
         };
         let video_input_dir = env_path("VWA_VIDEO_INPUT_DIR", data.join("videos"));
         let reference_input_dir = env_path("VWA_REFERENCE_INPUT_DIR", data.join("references"));
+        let video_projects_dir = env_lexical_path(
+            "VWA_VIDEO_PROJECTS_DIR",
+            data_lexical.join("video-projects"),
+        );
+        let receipt_key_file = env_lexical_path(
+            "VWA_RECEIPT_KEY_FILE",
+            PathBuf::from("/etc/xry/render-receipt.hmac.key"),
+        );
+        // Keep XRY paths lexical. The render queue checks every component for
+        // symlinks before canonicalizing, so eager canonicalization here would
+        // erase security-relevant evidence.
+        let xry_task_root =
+            env_lexical_path("VWA_XRY_TASK_ROOT", PathBuf::from("/srv/2.预处理/批量剪辑"));
+        let xry_source_root =
+            env_lexical_path("VWA_XRY_SOURCE_ROOT", PathBuf::from("/srv/1.素材/批量剪辑"));
+        let xry_renderer = env_lexical_path(
+            "VWA_XRY_RENDERER",
+            PathBuf::from("/srv/2.预处理/tools-723/render_variants.py"),
+        );
+        let default_xry_python = PathBuf::from("/usr/bin/python3")
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from("/usr/bin/python3"));
+        let xry_python = env_lexical_path("VWA_XRY_PYTHON", default_xry_python);
+        let video_project_renderer = env_lexical_path(
+            "VWA_VIDEO_PROJECT_RENDERER",
+            project_root.join("scripts").join("video_project_render.py"),
+        );
+        let video_project_python = env_lexical_path("VWA_VIDEO_PROJECT_PYTHON", xry_python.clone());
         Ok(Self {
             data_dir: data,
             model_dir: model,
@@ -87,10 +125,26 @@ impl Settings {
             funclip_root,
             video_input_dir,
             reference_input_dir,
+            video_projects_dir,
+            receipt_key_file,
             subtitle_timeout_seconds: env::var("VWA_SUBTITLE_TIMEOUT")
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1800),
+            xry_task_root,
+            xry_source_root,
+            xry_renderer,
+            xry_python,
+            render_timeout_seconds: env::var("VWA_RENDER_TIMEOUT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(21600),
+            video_project_renderer,
+            video_project_python,
+            video_project_render_timeout_seconds: env::var("VWA_VIDEO_PROJECT_RENDER_TIMEOUT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(7200),
             project_root,
         })
     }
@@ -129,6 +183,10 @@ impl Settings {
         self.project_root.join("static")
     }
 
+    pub fn render_jobs_dir(&self) -> PathBuf {
+        self.data_dir.join("render-jobs")
+    }
+
     pub fn create_data_dirs(&self) -> Result<()> {
         for path in [
             &self.data_dir,
@@ -136,6 +194,8 @@ impl Settings {
             &self.generations_dir(),
             &self.video_input_dir,
             &self.reference_input_dir,
+            &self.video_projects_dir,
+            &self.render_jobs_dir(),
         ] {
             fs::create_dir_all(path)
                 .with_context(|| format!("create directory {}", path.display()))?;

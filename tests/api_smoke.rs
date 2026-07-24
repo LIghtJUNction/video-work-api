@@ -9,7 +9,7 @@ use http_body_util::BodyExt;
 use tempfile::tempdir;
 use tower::ServiceExt;
 use video_work_api::config::{McpTokenSource, Settings};
-use video_work_api::database::Database;
+use video_work_api::database::{Database, NewRenderJob};
 use video_work_api::engine::FakeEngine;
 use video_work_api::http::{build_router, AppState, LoginLimiter};
 use video_work_api::model::ModelDownloadManager;
@@ -33,7 +33,21 @@ fn test_settings(root: &std::path::Path) -> Settings {
         funclip_root: None,
         video_input_dir: root.join("videos"),
         reference_input_dir: root.join("references"),
+        video_projects_dir: root.join("video-projects"),
+        receipt_key_file: root.join("receipt.key"),
         subtitle_timeout_seconds: 30,
+        xry_task_root: root.join("xry-tasks"),
+        xry_source_root: root.join("xry-sources"),
+        xry_renderer: root.join("render_variants.py"),
+        xry_python: std::path::PathBuf::from("/usr/bin/python3")
+            .canonicalize()
+            .unwrap(),
+        render_timeout_seconds: 30,
+        video_project_renderer: root.join("video_project_render.py"),
+        video_project_python: std::path::PathBuf::from("/usr/bin/python3")
+            .canonicalize()
+            .unwrap(),
+        video_project_render_timeout_seconds: 30,
         project_root: root.to_path_buf(),
     }
 }
@@ -64,6 +78,24 @@ async fn body_json(res: axum::response::Response) -> serde_json::Value {
     serde_json::from_slice(&bytes).unwrap_or(serde_json::json!({}))
 }
 
+async fn read_sse_until(body: &mut Body, marker: &str) -> String {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut received = String::new();
+    loop {
+        let frame = tokio::time::timeout_at(deadline, body.frame())
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for SSE marker {marker}"))
+            .expect("SSE stream ended")
+            .expect("SSE body failed");
+        if let Ok(data) = frame.into_data() {
+            received.push_str(std::str::from_utf8(&data).unwrap());
+            if received.contains(marker) {
+                return received;
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn setup_login_and_status() {
     let dir = tempdir().unwrap();
@@ -82,7 +114,7 @@ async fn setup_login_and_status() {
         Arc::new(FakeSubtitles::default()),
     ));
     let app = build_router(AppState {
-        studio,
+        studio: studio.clone(),
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
         model_download: Arc::new(ModelDownloadManager::new()),
@@ -167,7 +199,7 @@ async fn passkey_management_requires_auth_and_login_start_handles_empty_store() 
         Arc::new(FakeSubtitles::default()),
     ));
     let app = build_router(AppState {
-        studio,
+        studio: studio.clone(),
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
         model_download: Arc::new(ModelDownloadManager::new()),
@@ -267,6 +299,7 @@ async fn passkey_management_requires_auth_and_login_start_handles_empty_store() 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -299,7 +332,7 @@ async fn mcp_requires_bearer() {
         Arc::new(FakeSubtitles::default()),
     ));
     let app = build_router(AppState {
-        studio,
+        studio: studio.clone(),
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
         model_download: Arc::new(ModelDownloadManager::new()),
@@ -337,7 +370,556 @@ async fn mcp_requires_bearer() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let json = body_json(res).await;
-    assert!(json["result"]["tools"].as_array().unwrap().len() >= 5);
+    let tools = json["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["name"], "video_editor");
+}
+
+#[tokio::test]
+async fn editor_rest_requires_same_origin_session_and_enforces_revisions() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("static")).unwrap();
+    fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
+    let settings = test_settings(root);
+    settings.create_data_dirs().unwrap();
+    let db = Database::open(settings.database_path()).unwrap();
+    db.create_session(&video_work_api::security::token_hash("editor-session"))
+        .unwrap();
+    let studio = Arc::new(Studio::new(
+        settings,
+        db,
+        Arc::new(FakeEngine::new()),
+        Arc::new(FakeSubtitles::default()),
+    ));
+    let app = build_router(AppState {
+        studio: Arc::clone(&studio),
+        limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_download: Arc::new(ModelDownloadManager::new()),
+    });
+    let create = serde_json::json!({
+        "action": "create_project",
+        "slug": "aurora-launch"
+    })
+    .to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/editor")
+                .header("host", "testserver")
+                .header("content-type", "application/json")
+                .body(Body::from(create.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/editor")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("content-type", "application/json")
+                .body(Body::from(create.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/editor")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", "vwa_session=editor-session")
+                .header("content-type", "application/json")
+                .body(Body::from(create))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_json(response).await["revision"], 1);
+
+    let write = serde_json::json!({
+        "action": "write_file",
+        "project": "aurora-launch",
+        "path": "project.vpe",
+        "content": "project \"Aurora Launch\" {\n  canvas 1080x1920 @ 30fps\n  source main = \"assets/source.mp4\"\n  timeline { track main { clip main source 00:00:00.000..00:00:01.000 at 00:00:00.000 } }\n}\n",
+        "expected_revision": 1
+    })
+    .to_string();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/editor")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", "vwa_session=editor-session")
+                .header("content-type", "application/json")
+                .body(Body::from(write.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_json(response).await["revision"], 2);
+
+    fs::write(
+        &studio.settings.video_project_renderer,
+        include_bytes!("../scripts/video_project_render.py"),
+    )
+    .unwrap();
+    let status = std::process::Command::new("/usr/bin/ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:size=160x90:rate=10",
+            "-t",
+            "1.1",
+            "-c:v",
+            "libx264",
+            "-an",
+            "-y",
+        ])
+        .arg(
+            studio
+                .settings
+                .video_projects_dir
+                .join("aurora-launch/assets/source.mp4"),
+        )
+        .status()
+        .unwrap();
+    assert!(status.success());
+    for action in ["validate", "export"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/editor")
+                    .header("host", "testserver")
+                    .header("origin", "http://testserver")
+                    .header("cookie", "vwa_session=editor-session")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"action": action, "project": "aurora-launch"})
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = body_json(response).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["revision"], 2);
+        if action == "export" {
+            assert_eq!(body["render"]["job"]["kind"], "video_project");
+            assert_eq!(body["render"]["job"]["project_id"], "aurora-launch");
+            assert_eq!(body["render"]["job"]["project_revision"], 2);
+            assert_eq!(
+                body["render"]["job"]["document_sha"],
+                body["document_sha256"]
+            );
+        }
+    }
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/editor")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", "vwa_session=editor-session")
+                .header("content-type", "application/json")
+                .body(Body::from(write))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        body_json(response).await["error"]["code"],
+        "editor_conflict"
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/renders")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", "vwa_session=editor-session")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"task_dir":"group/batch","subject_id":"S01"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn editor_events_require_session_and_origin_and_emit_sanitized_changes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("static")).unwrap();
+    fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
+    let settings = test_settings(root);
+    settings.create_data_dirs().unwrap();
+    let db = Database::open(settings.database_path()).unwrap();
+    db.create_session(&video_work_api::security::token_hash("event-session"))
+        .unwrap();
+    let studio = Arc::new(Studio::new(
+        settings,
+        db,
+        Arc::new(FakeEngine::new()),
+        Arc::new(FakeSubtitles::default()),
+    ));
+    let app = build_router(AppState {
+        studio: Arc::clone(&studio),
+        limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_download: Arc::new(ModelDownloadManager::new()),
+    });
+    let create = serde_json::json!({
+        "action": "create_project",
+        "slug": "event-project"
+    })
+    .to_string();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/editor")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", "vwa_session=event-session")
+                .header("content-type", "application/json")
+                .body(Body::from(create))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    for (cookie, origin, expected) in [
+        (None, "http://testserver", StatusCode::UNAUTHORIZED),
+        (
+            Some("vwa_session=event-session"),
+            "http://elsewhere",
+            StatusCode::FORBIDDEN,
+        ),
+    ] {
+        let mut builder = Request::builder()
+            .uri("/api/editor/events")
+            .header("host", "testserver")
+            .header("origin", origin);
+        if let Some(cookie) = cookie {
+            builder = builder.header("cookie", cookie);
+        }
+        let response = app
+            .clone()
+            .oneshot(builder.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/editor/events")
+                .header("host", "testserver")
+                .header("cookie", "vwa_session=event-session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/editor/events")
+                .header("host", "testserver")
+                .header("sec-fetch-site", "same-origin")
+                .header("cookie", "vwa_session=event-session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
+    for (uri, authorization, expected) in [
+        (
+            "/api/editor/events?token=forbidden",
+            None,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "/api/editor/events",
+            Some("Bearer forbidden"),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let mut builder = Request::builder()
+            .uri(uri)
+            .header("host", "testserver")
+            .header("origin", "http://testserver")
+            .header("cookie", "vwa_session=event-session");
+        if let Some(authorization) = authorization {
+            builder = builder.header("authorization", authorization);
+        }
+        let response = app
+            .clone()
+            .oneshot(builder.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        if response.status() != expected {
+            let status = response.status();
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            panic!(
+                "{uri} authorization={authorization:?}: expected {expected}, got {status}: {}",
+                String::from_utf8_lossy(&body)
+            );
+        }
+    }
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/editor/events")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", "vwa_session=event-session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["cache-control"],
+        "no-store, no-cache, must-revalidate"
+    );
+    assert!(response.headers()["content-type"]
+        .to_str()
+        .unwrap()
+        .starts_with("text/event-stream"));
+    let mut events = response.into_body();
+    let initial = read_sse_until(&mut events, "event: snapshot").await;
+    assert!(initial.contains("event-project"));
+    assert!(!initial.contains(&root.to_string_lossy().to_string()));
+    for private in [
+        "render_key",
+        "task_dir",
+        "log_path",
+        "snapshot_dir",
+        "renderer_hash",
+        "publication_intent",
+        "recovery_blocked",
+    ] {
+        assert!(!initial.contains(private));
+    }
+
+    let write = serde_json::json!({
+        "action": "write_file",
+        "project": "event-project",
+        "path": "project.vpe",
+        "content": "project \"Event Project\" {\n  canvas 1080x1920 @ 30fps\n}\n",
+        "expected_revision": 1
+    })
+    .to_string();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/editor")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", "vwa_session=event-session")
+                .header("content-type", "application/json")
+                .body(Body::from(write))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let project_event = read_sse_until(&mut events, "event: project_changed").await;
+    assert!(project_event.contains("\"revision\":2"));
+
+    studio
+        .database
+        .insert_or_get_render_job(NewRenderJob {
+            id: "event-job",
+            render_key: "event-render-key",
+            task_dir: "/private/task",
+            subject_id: "subject",
+            encoder_profile: "formal-auto",
+            log_path: "/private/render.log",
+            snapshot_dir: "/private/snapshot",
+            snapshot_hash: "snapshot-hash",
+            renderer_hash: "renderer-hash",
+        })
+        .unwrap();
+    let job_event = read_sse_until(&mut events, "event: job_changed").await;
+    assert!(job_event.contains("\"id\":\"event-job\""));
+    assert!(job_event.contains("\"status\":\"queued\""));
+    assert!(!job_event.contains("/private/"));
+    assert!(!job_event.contains("event-render-key"));
+}
+
+#[tokio::test]
+async fn editor_mcp_requires_bearer_and_dispatches_single_tool() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("static")).unwrap();
+    fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
+    let settings = test_settings(root);
+    settings.create_data_dirs().unwrap();
+    let studio = Arc::new(Studio::new(
+        settings.clone(),
+        Database::open(settings.database_path()).unwrap(),
+        Arc::new(FakeEngine::new()),
+        Arc::new(FakeSubtitles::default()),
+    ));
+    let app = build_router(AppState {
+        studio,
+        limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_download: Arc::new(ModelDownloadManager::new()),
+    });
+    let call = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {
+            "name": "video_editor",
+            "arguments": {
+                "action": "create_project",
+                "slug": "mcp-project"
+            }
+        }
+    })
+    .to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("content-type", "application/json")
+                .body(Body::from(call.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("authorization", "Bearer mcp-secret-token")
+                .header("content-type", "application/json")
+                .body(Body::from(call))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(
+        json["result"]["structuredContent"]["project"],
+        "mcp-project"
+    );
+    assert_eq!(json["result"]["structuredContent"]["revision"], 1);
+
+    let migrated = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "tools/call",
+        "params": {
+            "name": "video_editor",
+            "arguments": { "action": "get_status" }
+        }
+    })
+    .to_string();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("authorization", "Bearer mcp-secret-token")
+                .header("content-type", "application/json")
+                .body(Body::from(migrated))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        body_json(response).await["result"]["structuredContent"]["service"],
+        "Video Work API"
+    );
+
+    let legacy = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {
+            "name": "get_status",
+            "arguments": {}
+        }
+    })
+    .to_string();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("authorization", "Bearer mcp-secret-token")
+                .header("content-type", "application/json")
+                .body(Body::from(legacy))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_json(response).await["error"]["code"], -32601);
 }
 
 #[tokio::test]

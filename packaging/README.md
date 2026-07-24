@@ -54,6 +54,16 @@ sudo systemctl start video-work-api.service
 配置 Codex。仅在兼容旧部署时才需要在 `config.env` 设置优先级更高的
 `VWA_MCP_TOKEN`。
 
+钩子还会创建专用系统组 `xry-render`，将 `video-work-api` 与已存在的 `xry`
+账号加入该组，并把已有 `/etc/xry/render-receipt.hmac.key` 规范为
+`root:xry-render`、`0640`。首次 key 仍应使用 XRY canonical 生成器创建：
+
+```bash
+sudo python /srv/xry/.agents/skills/xry-video-acceptance/scripts/generate_receipt_key.py
+sudo chown root:xry-render /etc/xry/render-receipt.hmac.key
+sudo chmod 0640 /etc/xry/render-receipt.hmac.key
+```
+
 ## 本地试构建（不上传 AUR）
 
 ```bash

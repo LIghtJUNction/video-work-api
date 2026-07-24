@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Video Project Editor</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260723a">
+  <link rel="stylesheet" href="/static/editor.css?v=20260724a">
+  <script src="/static/editor.js?v=20260724a" defer></script>
+</head>
+<body>
+  <div class="editor-app">
+    <header class="topbar">
+      <a class="brand" href="/editor" aria-label="Video Project Editor home">
+        <span class="brand-mark" aria-hidden="true">VP</span>
+        <strong>Video Project Editor</strong>
+      </a>
+      <div class="workspace-path" aria-label="Current workspace">
+        <span>Workspace</span><b>Video Work API</b><span>›</span><b id="activeProjectName">No project</b>
+      </div>
+      <div class="connection-state" id="connectionState" role="status">
+        <span class="state-dot"></span><span>Connecting</span>
+      </div>
+      <a class="toolbar-button" href="/">Voice Studio</a>
+      <a class="toolbar-button" href="/docs">Docs</a>
+      <button class="toolbar-button" id="saveButton" type="button" disabled>Save</button>
+      <button class="toolbar-button" id="validateButton" type="button" disabled>Validate</button>
+      <button class="primary-button" id="exportButton" type="button" disabled>Export</button>
+    </header>
+
+    <main class="workbench">
+      <aside class="explorer panel" aria-label="Project Explorer">
+        <div class="panel-heading">
+          <span>Explorer</span>
+          <button class="icon-button" id="newProjectButton" type="button" aria-label="Create project">＋</button>
+        </div>
+        <div id="projectList" class="project-list" aria-live="polite">
+          <div class="empty-state">Loading projects…</div>
+        </div>
+      </aside>
+
+      <section class="source-pane panel" aria-label="Text editor">
+        <nav id="editorTabs" class="editor-tabs" aria-label="Open files"></nav>
+        <div class="breadcrumbs" id="breadcrumbs">No file open</div>
+        <div id="remoteBanner" class="remote-banner hidden" role="status">
+          <span>Remote revision available.</span>
+          <button id="reloadRemoteButton" type="button">Reload</button>
+          <button id="keepEditingButton" type="button">Keep editing</button>
+        </div>
+        <div id="readOnlyBanner" class="read-only-banner hidden" role="status">
+          Generated file · Read-only
+        </div>
+        <div class="editor-surface">
+          <div id="lineGutter" class="line-gutter" aria-hidden="true"></div>
+          <textarea id="sourceEditor" aria-label="Virtual project file editor" wrap="off"
+            spellcheck="false" autocomplete="off" autocapitalize="off" disabled></textarea>
+        </div>
+        <section class="bottom-panel" id="bottomPanel">
+          <div class="bottom-tabs">
+            <button class="bottom-tab active" type="button" data-panel="problems">
+              Problems <span id="problemCount">0</span>
+            </button>
+            <button class="bottom-tab" type="button" data-panel="jobs">
+              Jobs <span id="jobCount">0</span>
+            </button>
+            <button class="panel-collapse" id="collapseBottomButton" type="button"
+              aria-label="Collapse bottom panel">⌄</button>
+          </div>
+          <div id="problemsPanel" class="bottom-content" role="log" aria-live="polite">
+            <div class="empty-state">No problems detected.</div>
+          </div>
+          <div id="jobsPanel" class="bottom-content hidden"></div>
+        </section>
+      </section>
+
+      <aside class="inspector panel" aria-label="Live Project inspector">
+        <div class="panel-heading">
+          <span>Live Project</span>
+          <span id="validationBadge" class="status-badge neutral">Not validated</span>
+        </div>
+        <div class="inspector-scroll">
+          <section class="inspector-section">
+            <h2>Project summary</h2>
+            <dl class="metric-grid">
+              <div><dt>Duration</dt><dd id="durationMetric">—</dd></div>
+              <div><dt>Main tracks</dt><dd id="mainTrackMetric">0</dd></div>
+              <div><dt>Overlay tracks</dt><dd id="overlayTrackMetric">0</dd></div>
+              <div><dt>Markers</dt><dd id="markerMetric">0</dd></div>
+            </dl>
+          </section>
+          <section class="inspector-section">
+            <h2>Timeline</h2>
+            <div id="timelineInspector" class="timeline-inspector">
+              <div class="empty-state">Open project.vpe to inspect the timeline.</div>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <h2>Document outline</h2>
+            <div id="outlineInspector" class="outline-list"></div>
+          </section>
+          <section class="inspector-section queue-section">
+            <div class="section-row">
+              <h2>Current job queue</h2>
+              <button class="icon-button" id="refreshJobsButton" type="button" aria-label="Refresh jobs">↻</button>
+            </div>
+            <div id="queueInspector" class="queue-list">
+              <div class="empty-state">No project jobs.</div>
+            </div>
+          </section>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="statusbar">
+      <span id="liveStatus" class="live-status">OFFLINE</span>
+      <span id="dirtyStatus">Clean</span>
+      <span id="revisionStatus">Revision —</span>
+      <span id="cursorStatus">Ln 1, Col 1</span>
+      <span class="status-spacer"></span>
+      <span id="documentSizeStatus">0 B</span>
+      <span>UTF-8</span>
+      <span>VPE</span>
+    </footer>
+  </div>
+
+  <dialog id="createProjectDialog" class="project-dialog">
+    <form id="createProjectForm">
+      <div class="dialog-heading">
+        <div><span class="dialog-kicker">NEW WORKSPACE ROOT</span><h1>Create video project</h1></div>
+        <button class="icon-button" id="closeProjectDialog" type="button" aria-label="Close">×</button>
+      </div>
+      <label>Project slug
+        <input id="projectSlug" name="slug" required maxlength="64"
+          pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="campaign-cut">
+      </label>
+      <p class="field-help">Lowercase letters, numbers, and single hyphens.</p>
+      <div id="createProjectError" class="field-error" role="alert"></div>
+      <div class="dialog-actions">
+        <button class="toolbar-button" id="cancelProjectDialog" type="button">Cancel</button>
+        <button class="primary-button" type="submit">Create project</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="authGate" class="auth-gate hidden" role="dialog" aria-modal="true"
+    aria-labelledby="authGateTitle">
+    <div class="auth-gate-card">
+      <span class="brand-mark" aria-hidden="true">VP</span>
+      <h1 id="authGateTitle">Administrator session required</h1>
+      <p>Sign in through Video Work API, then return to the editor.</p>
+      <a class="primary-button" href="/">Open Voice Studio</a>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+</body>
+</html>

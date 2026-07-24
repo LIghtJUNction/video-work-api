@@ -2,12 +2,14 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::{collections::BTreeMap, convert::Infallible};
 
 use axum::body::Body;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Multipart, Path as AxumPath, Request, State};
 use axum::http::{header, HeaderMap, Method, StatusCode};
 use axum::middleware::{self, Next};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, patch, post};
 use axum::{Extension, Json, Router};
@@ -16,6 +18,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tokio::sync::{mpsc, Semaphore};
+use tokio_stream::wrappers::ReceiverStream;
 use tower_http::services::ServeDir;
 use uuid::Uuid;
 use webauthn_rs::prelude::{Passkey, PublicKeyCredential, RegisterPublicKeyCredential};
@@ -28,12 +32,14 @@ use crate::mcp::{handle_mcp_message, McpResponse};
 use crate::model::{download_model, model_files_present, ModelDownloadManager};
 use crate::passkeys::{CeremonyStore, CeremonyStoreError, PasskeyWebauthn, PendingCeremony};
 use crate::paths::safe_owned_file;
+use crate::render_queue;
 use crate::security::{
     constant_time_eq, hash_password, is_admin_password_valid, new_session_token, token_hash,
     verify_password,
 };
 use crate::studio::{Studio, StudioError};
 use crate::subtitles::{video_extension_allowed, MAX_VIDEO_UPLOAD_BYTES};
+use crate::video_editor::{self, EditorError, VideoEditorRequest};
 use crate::{target_text_is_valid, COOKIE_NAME};
 
 #[derive(Clone)]
@@ -49,6 +55,7 @@ pub fn build_router(state: AppState) -> Router {
     let static_dir = state.studio.settings.static_dir();
     let index = static_dir.join("index.html");
     let docs = static_dir.join("docs.html");
+    let editor = static_dir.join("editor.html");
 
     let api = Router::new()
         .route("/api/status", get(status))
@@ -94,6 +101,8 @@ pub fn build_router(state: AppState) -> Router {
             get(generation_audio),
         )
         .route("/api/videos/subtitles", post(video_subtitles))
+        .route("/api/editor", post(video_editor_action))
+        .route("/api/editor/events", get(video_editor_events))
         .route(
             "/api/videos/subtitles/upload",
             post(video_subtitles_upload).layer(DefaultBodyLimit::max(
@@ -108,6 +117,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/", get(move || serve_html_file(index.clone())))
         .route("/docs", get(move || serve_html_file(docs.clone())))
+        .route("/editor", get(move || serve_html_file(editor.clone())))
         .route(
             "/favicon.ico",
             get(|| async { Redirect::temporary("/static/favicon.svg") }),
@@ -353,6 +363,269 @@ fn load_stored_passkeys(state: &AppState) -> AppResult<Vec<(String, Passkey)>> {
 async fn status(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json<Value>> {
     let auth = current_session(&state, &jar);
     Ok(Json(state.studio.status_payload(auth)?))
+}
+
+async fn video_editor_action(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(request): Json<VideoEditorRequest>,
+) -> AppResult<Json<Value>> {
+    require_auth(&state, &jar)?;
+    let studio = state.studio.clone();
+    let payload = tokio::task::spawn_blocking(move || video_editor::execute(&studio, request))
+        .await
+        .map_err(|error| AppError::Internal(error.into()))?
+        .map_err(map_editor_error)?;
+    Ok(Json(payload))
+}
+
+const MAX_EDITOR_EVENT_CONNECTIONS: usize = 16;
+const EDITOR_EVENT_CHANNEL_CAPACITY: usize = 32;
+
+static EDITOR_EVENT_LIMIT: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+#[derive(Clone, PartialEq)]
+struct EditorEventSnapshot {
+    projects: Vec<Value>,
+    jobs: Vec<Value>,
+}
+
+async fn video_editor_events(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    request: Request,
+) -> AppResult<Response> {
+    require_auth(&state, &jar)?;
+    require_same_origin_event_request(request.headers())?;
+    if request.uri().query().is_some() || request.headers().contains_key(header::AUTHORIZATION) {
+        return Err(AppError::invalid_request(
+            "Editor events use the authenticated session only",
+        ));
+    }
+    let permit = EDITOR_EVENT_LIMIT
+        .get_or_init(|| Arc::new(Semaphore::new(MAX_EDITOR_EVENT_CONNECTIONS)))
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            AppError::api(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "editor_events_capacity",
+                "Too many editor event streams are open",
+            )
+        })?;
+    let initial = collect_editor_event_snapshot(state.studio.clone()).await?;
+    let (sender, receiver) =
+        mpsc::channel::<Result<Event, Infallible>>(EDITOR_EVENT_CHANNEL_CAPACITY);
+
+    tokio::spawn(async move {
+        let _permit = permit;
+        let mut sequence = 1_u64;
+        if send_editor_event(&sender, "snapshot", sequence, snapshot_payload(&initial))
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let mut previous = initial;
+        let mut poll = tokio::time::interval(std::time::Duration::from_secs(1));
+        poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        poll.tick().await;
+        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(15));
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        heartbeat.tick().await;
+        loop {
+            tokio::select! {
+                _ = sender.closed() => break,
+                _ = heartbeat.tick() => {
+                    sequence += 1;
+                    if send_editor_event(&sender, "heartbeat", sequence, json!({})).await.is_err() {
+                        break;
+                    }
+                }
+                _ = poll.tick() => {
+                    let current = match collect_editor_event_snapshot(state.studio.clone()).await {
+                        Ok(snapshot) => snapshot,
+                        Err(_) => {
+                            sequence += 1;
+                            if send_editor_event(
+                                &sender,
+                                "snapshot_error",
+                                sequence,
+                                json!({"code": "snapshot_unavailable"}),
+                            ).await.is_err() {
+                                break;
+                            }
+                            continue;
+                        }
+                    };
+                    if current.projects != previous.projects {
+                        sequence += 1;
+                        if send_editor_event(
+                            &sender,
+                            "projects_changed",
+                            sequence,
+                            json!({"projects": current.projects}),
+                        ).await.is_err() {
+                            break;
+                        }
+                        let prior = values_by_key(&previous.projects, "slug");
+                        for project in &current.projects {
+                            let slug = project.get("slug").and_then(Value::as_str).unwrap_or("");
+                            if prior.get(slug).copied() != Some(project) {
+                                sequence += 1;
+                                if send_editor_event(
+                                    &sender,
+                                    "project_changed",
+                                    sequence,
+                                    json!({"project": project}),
+                                ).await.is_err() {
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    let prior_jobs = values_by_key(&previous.jobs, "id");
+                    for job in &current.jobs {
+                        let id = job.get("id").and_then(Value::as_str).unwrap_or("");
+                        if prior_jobs.get(id).copied() != Some(job) {
+                            sequence += 1;
+                            if send_editor_event(
+                                &sender,
+                                "job_changed",
+                                sequence,
+                                json!({"job": job}),
+                            ).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    previous = current;
+                }
+            }
+        }
+    });
+
+    let mut response = Sse::new(ReceiverStream::new(receiver))
+        .keep_alive(
+            KeepAlive::new()
+                .interval(std::time::Duration::from_secs(5))
+                .text("keepalive"),
+        )
+        .into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+    );
+    response.headers_mut().insert(
+        header::HeaderName::from_static("x-accel-buffering"),
+        header::HeaderValue::from_static("no"),
+    );
+    Ok(response)
+}
+
+fn require_same_origin_event_request(headers: &HeaderMap) -> AppResult<()> {
+    let fetch_site = headers
+        .get("sec-fetch-site")
+        .and_then(|value| value.to_str().ok());
+    if fetch_site == Some("cross-site") {
+        return Err(AppError::forbidden_origin());
+    }
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let Some(origin) = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    else {
+        // Chromium omits Origin on a same-origin EventSource GET. Fetch Metadata
+        // is browser-controlled and provides the equivalent same-origin proof.
+        return if fetch_site == Some("same-origin") && !host.is_empty() {
+            Ok(())
+        } else {
+            Err(AppError::forbidden_origin())
+        };
+    };
+    let url = url::Url::parse(origin).map_err(|_| AppError::forbidden_origin())?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(AppError::forbidden_origin());
+    }
+    let origin_host = match url.host() {
+        Some(url::Host::Domain(domain)) => domain.to_string(),
+        Some(url::Host::Ipv4(ip)) => ip.to_string(),
+        Some(url::Host::Ipv6(ip)) => format!("[{ip}]"),
+        None => return Err(AppError::forbidden_origin()),
+    };
+    let origin_netloc = url
+        .port()
+        .map_or(origin_host.clone(), |port| format!("{origin_host}:{port}"));
+    if host.is_empty() || !origin_netloc.eq_ignore_ascii_case(host) {
+        return Err(AppError::forbidden_origin());
+    }
+    Ok(())
+}
+
+async fn collect_editor_event_snapshot(studio: Arc<Studio>) -> AppResult<EditorEventSnapshot> {
+    tokio::task::spawn_blocking(move || {
+        let projects = video_editor::execute(&studio, VideoEditorRequest::ListProjects {})?;
+        let jobs = render_queue::list_public(&studio)?;
+        Ok::<_, anyhow::Error>(EditorEventSnapshot {
+            projects: projects
+                .get("projects")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+            jobs: jobs
+                .get("jobs")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        })
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.into()))?
+    .map_err(AppError::Internal)
+}
+
+fn snapshot_payload(snapshot: &EditorEventSnapshot) -> Value {
+    json!({
+        "projects": snapshot.projects,
+        "jobs": snapshot.jobs,
+    })
+}
+
+fn values_by_key<'a>(values: &'a [Value], key: &str) -> BTreeMap<&'a str, &'a Value> {
+    values
+        .iter()
+        .filter_map(|value| Some((value.get(key)?.as_str()?, value)))
+        .collect()
+}
+
+async fn send_editor_event(
+    sender: &mpsc::Sender<Result<Event, Infallible>>,
+    name: &str,
+    sequence: u64,
+    payload: Value,
+) -> Result<(), ()> {
+    let data = serde_json::to_string(&payload).map_err(|_| ())?;
+    sender
+        .send(Ok(Event::default()
+            .event(name)
+            .id(sequence.to_string())
+            .data(data)))
+        .await
+        .map_err(|_| ())
+}
+
+fn map_editor_error(error: EditorError) -> AppError {
+    match error {
+        EditorError::Invalid(message) => AppError::invalid_request(message),
+        EditorError::NotFound(message) => AppError::not_found(message),
+        EditorError::Conflict(message) => {
+            AppError::api(StatusCode::CONFLICT, "editor_conflict", message)
+        }
+        EditorError::Internal(error) => AppError::Internal(error),
+    }
 }
 
 #[derive(Deserialize)]

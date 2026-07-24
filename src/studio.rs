@@ -45,6 +45,8 @@ impl Studio {
         // once in this process" (lazy warm). Keep that meaning, and expose
         // clearer readiness fields for the UI.
         let model_warm = self.engine.loaded();
+        let (render_queued, render_running) = self.database.render_job_counts()?;
+        let project_count = self.database.list_video_projects()?.len();
         Ok(json!({
             "product": PRODUCT,
             "service": "Video Work API",
@@ -62,6 +64,19 @@ impl Studio {
                 "configured": self.settings.mcp_token.is_some(),
             },
             "funclip_ready": self.subtitles.ready(),
+            "video_editor": {
+                "path": "/api/editor",
+                "projects_root_ready": self.settings.video_projects_dir.is_dir(),
+                "projects": project_count,
+                "canonical_file": "project.vpe",
+            },
+            "render_queue": {
+                "ready": self.settings.xry_renderer.is_file()
+                    && self.settings.xry_task_root.is_dir()
+                    && self.settings.xry_source_root.is_dir(),
+                "queued": render_queued,
+                "running": render_running,
+            },
             "limits": {
                 "max_text_length": MAX_TEXT_LENGTH,
                 "min_speed": 0.75,
@@ -357,20 +372,22 @@ impl Studio {
         let root = self.settings.video_input_dir.as_path();
         let video_path = resolve_under_root(video_path_raw, root)
             .ok_or_else(|| anyhow!("Video must be inside the configured video input directory"))?;
-        let (segments, srt) = self.subtitles.extract(&video_path)?;
+        let (segments, srt, words) = self.subtitles.extract(&video_path)?;
         Ok(json!({
             "segments": segments,
             "srt": srt,
+            "words": words,
         }))
     }
 
     /// Extract subtitles from a server-created upload temp file (already trusted,
     /// so the video_input_dir sandbox does not apply).
     pub fn extract_subtitles_from_upload(&self, video_path: &Path) -> Result<Value> {
-        let (segments, srt) = self.subtitles.extract(video_path)?;
+        let (segments, srt, words) = self.subtitles.extract(video_path)?;
         Ok(json!({
             "segments": segments,
             "srt": srt,
+            "words": words,
         }))
     }
 }

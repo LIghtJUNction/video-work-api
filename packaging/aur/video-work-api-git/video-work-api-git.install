@@ -6,6 +6,8 @@
 set -e
 
 _SERVICE_USER=video-work-api
+_RENDER_GROUP=xry-render
+_RECEIPT_KEY=/etc/xry/render-receipt.hmac.key
 _DATA_DIR=/var/lib/video-work-api
 _CONF_DIR=/etc/video-work-api
 _APP_DIR=/usr/lib/video-work-api
@@ -18,6 +20,9 @@ _ensure_root() {
 }
 
 _ensure_user_and_dirs() {
+  if ! getent group "$_RENDER_GROUP" >/dev/null 2>&1; then
+    groupadd --system "$_RENDER_GROUP"
+  fi
   if ! getent group "$_SERVICE_USER" >/dev/null 2>&1; then
     groupadd --system "$_SERVICE_USER"
   fi
@@ -28,6 +33,14 @@ _ensure_user_and_dirs() {
       --shell /usr/bin/nologin \
       --comment "Video Work API" \
       "$_SERVICE_USER"
+  fi
+  usermod --append --groups "$_RENDER_GROUP" "$_SERVICE_USER"
+  if getent passwd xry >/dev/null 2>&1; then
+    usermod --append --groups "$_RENDER_GROUP" xry
+  fi
+  if [ -f "$_RECEIPT_KEY" ]; then
+    chown "root:$_RENDER_GROUP" "$_RECEIPT_KEY"
+    chmod 0640 "$_RECEIPT_KEY"
   fi
 
   install -dm750 -o "$_SERVICE_USER" -g "$_SERVICE_USER" "$_DATA_DIR"

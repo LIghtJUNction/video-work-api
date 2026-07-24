@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 User=video-work-api
 Group=video-work-api
+SupplementaryGroups=xry-render
 WorkingDirectory=/usr/lib/video-work-api
 Environment=VWA_DATA_DIR=/var/lib/video-work-api
 Environment=VWA_SETUP_TOKEN_FILE=/var/lib/video-work-api/setup-token
@@ -21,7 +22,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/video-work-api
+ReadWritePaths=/var/lib/video-work-api -/srv/2.预处理/批量剪辑
+ReadOnlyPaths=-/srv/1.素材/批量剪辑 -/srv/2.预处理/tools-723 -/srv/0.参考 -/srv/3.成品
 
 [Install]
 WantedBy=multi-user.target

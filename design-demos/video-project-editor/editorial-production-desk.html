@@ -1,0 +1,1324 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Project Editor — Editorial Production Desk</title>
+  <style>
+    /*
+      Direction B assumptions
+      - This is a supervision desk for one technical operator at laptop distance.
+      - project.vpe remains the only writable source; parsed visuals are inspection aids.
+      - The warm editorial metaphor is structural: project folios, a manuscript, a production ledger,
+        and a filmstrip inspection rail. It is not a reskinned conventional code editor.
+      - Interactions are intentionally lightweight and local: select projects, inspect the rail,
+        follow the Agent, validate, enqueue export, and cancel a job.
+    */
+    :root {
+      --ivory: #f2ecdf;
+      --paper: #fbf7ee;
+      --paper-2: #e9dfcd;
+      --ink: #20231f;
+      --ink-2: #4b4d45;
+      --ink-3: #737367;
+      --hair: #cfc3ae;
+      --hair-dark: #a99b84;
+      --clay: #a84f35;
+      --clay-dark: #753623;
+      --clay-soft: #e8c5b5;
+      --green: #486c56;
+      --green-soft: #d5e0d2;
+      --amber: #9b6a24;
+      --amber-soft: #ead9b9;
+      --charcoal: #252720;
+      --shadow: 0 18px 44px rgba(47, 38, 25, .11);
+      --sans: "Aptos", "Segoe UI", sans-serif;
+      --serif: Georgia, "Times New Roman", serif;
+      --mono: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #d9d0c0;
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 14px;
+    }
+
+    button { font: inherit; }
+
+    #app {
+      width: 1440px;
+      height: 900px;
+      margin: 0 auto;
+      overflow: hidden;
+      background: var(--ivory);
+      box-shadow: 0 0 60px rgba(36, 31, 24, .15);
+      display: grid;
+      grid-template-rows: 72px 1fr 28px;
+    }
+
+    .masthead {
+      display: grid;
+      grid-template-columns: 248px 1fr auto;
+      align-items: stretch;
+      background: var(--paper);
+      border-bottom: 1px solid var(--hair);
+      position: relative;
+      z-index: 3;
+    }
+
+    .brand {
+      padding: 12px 20px 10px;
+      border-right: 1px solid var(--hair);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-mark {
+      width: 35px;
+      height: 40px;
+      background: var(--clay);
+      color: #fff9ef;
+      display: grid;
+      place-items: center;
+      font: 700 18px/1 var(--serif);
+      box-shadow: inset 0 -5px 0 rgba(91, 34, 21, .18);
+    }
+
+    .brand h1 {
+      margin: 0 0 2px;
+      font: 700 17px/1.05 var(--serif);
+      letter-spacing: -.2px;
+    }
+
+    .eyebrow {
+      font: 700 12px/1 var(--mono);
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      color: var(--clay-dark);
+    }
+
+    .production-context {
+      padding: 10px 24px 9px;
+      display: flex;
+      align-items: center;
+      gap: 23px;
+    }
+
+    .context-block {
+      min-width: 140px;
+    }
+
+    .context-block span,
+    .queue-kicker,
+    .section-label {
+      display: block;
+      margin-bottom: 4px;
+      font: 700 12px/1 var(--mono);
+      text-transform: uppercase;
+      letter-spacing: .075em;
+      color: var(--ink-3);
+    }
+
+    .context-block strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 650;
+      color: var(--ink);
+    }
+
+    .live-signal {
+      display: inline-flex;
+      gap: 7px;
+      align-items: center;
+      color: var(--green);
+    }
+
+    .pulse {
+      width: 8px;
+      height: 8px;
+      background: var(--green);
+      border-radius: 50%;
+      box-shadow: 0 0 0 4px rgba(72, 108, 86, .13);
+      animation: breathe 2s ease-in-out infinite;
+    }
+
+    @keyframes breathe {
+      50% { box-shadow: 0 0 0 7px rgba(72, 108, 86, 0); }
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 18px;
+    }
+
+    .button {
+      border: 1px solid var(--hair-dark);
+      background: var(--paper);
+      color: var(--ink);
+      min-height: 38px;
+      padding: 0 14px;
+      cursor: pointer;
+      font-weight: 650;
+      transition: background .15s, color .15s, transform .15s;
+    }
+
+    .button:hover { background: #eee5d6; }
+    .button:active { transform: translateY(1px); }
+    .button.primary {
+      border-color: var(--clay);
+      background: var(--clay);
+      color: #fffaf3;
+      min-width: 126px;
+    }
+    .button.primary:hover { background: var(--clay-dark); }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 248px 1fr;
+    }
+
+    .folios {
+      min-height: 0;
+      background: #dfd4c2;
+      border-right: 1px solid var(--hair-dark);
+      padding: 18px 14px 12px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .folios::after {
+      content: "";
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: 11px;
+      border-bottom: 1px solid rgba(95, 82, 61, .2);
+    }
+
+    .workspace-title {
+      margin: 3px 5px 16px;
+    }
+
+    .workspace-title h2 {
+      margin: 4px 0 0;
+      font: 700 20px/1.05 var(--serif);
+      letter-spacing: -.25px;
+    }
+
+    .folio {
+      width: 100%;
+      margin: 0 0 9px;
+      padding: 0;
+      text-align: left;
+      color: var(--ink);
+      border: 1px solid #bbae96;
+      background: #ece2d1;
+      cursor: pointer;
+      box-shadow: 0 5px 12px rgba(54, 46, 34, .07);
+      position: relative;
+    }
+
+    .folio::before {
+      content: "";
+      position: absolute;
+      top: -7px;
+      left: 14px;
+      width: 73px;
+      height: 7px;
+      background: #cdbb9e;
+      border: 1px solid #b3a287;
+      border-bottom: 0;
+    }
+
+    .folio.active {
+      background: var(--paper);
+      border-color: var(--clay);
+      box-shadow: 0 8px 20px rgba(65, 49, 31, .13);
+    }
+
+    .folio.active::before {
+      background: var(--clay);
+      border-color: var(--clay);
+    }
+
+    .folio-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: start;
+      gap: 8px;
+      padding: 12px 12px 9px;
+    }
+
+    .folio-name {
+      font: 700 15px/1.2 var(--mono);
+      letter-spacing: -.02em;
+    }
+
+    .folio-note {
+      display: block;
+      margin-top: 5px;
+      font-size: 12px;
+      color: var(--ink-3);
+    }
+
+    .state-dot {
+      width: 9px;
+      height: 9px;
+      margin-top: 3px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+    .state-dot.modified { background: var(--clay); }
+    .state-dot.warning { background: var(--amber); }
+
+    .file-tree {
+      border-top: 1px solid var(--hair);
+      padding: 7px 0 9px;
+      background: rgba(251, 247, 238, .55);
+    }
+
+    .file-row {
+      width: 100%;
+      min-height: 29px;
+      border: 0;
+      background: transparent;
+      display: grid;
+      grid-template-columns: 18px 1fr auto;
+      gap: 7px;
+      align-items: center;
+      text-align: left;
+      color: var(--ink-2);
+      padding: 0 11px 0 16px;
+      cursor: pointer;
+      font: 14px/1 var(--mono);
+    }
+
+    .file-row:hover,
+    .file-row.selected {
+      background: #dfd3c0;
+      color: var(--ink);
+    }
+
+    .file-row.readonly { color: #777264; }
+    .file-row .chevron { font-family: var(--sans); color: var(--ink-3); }
+    .file-row .count { font: 12px/1 var(--sans); color: var(--ink-3); }
+    .readonly-tag { font: 700 10px/1 var(--sans); letter-spacing: .05em; }
+
+    .desk {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 1fr 214px;
+      background: var(--paper-2);
+    }
+
+    .upper-desk {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(650px, 1fr) 330px;
+      gap: 1px;
+      background: var(--hair);
+      border-bottom: 1px solid var(--hair-dark);
+    }
+
+    .manuscript {
+      min-width: 0;
+      min-height: 0;
+      background: var(--paper);
+      display: grid;
+      grid-template-rows: 48px 1fr;
+    }
+
+    .document-strip {
+      display: flex;
+      align-items: end;
+      gap: 0;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--hair);
+      background: #ece4d6;
+    }
+
+    .doc-tab {
+      height: 40px;
+      display: flex;
+      gap: 9px;
+      align-items: center;
+      padding: 0 16px;
+      border: 0;
+      border-right: 1px solid var(--hair);
+      background: transparent;
+      color: var(--ink-2);
+      cursor: pointer;
+      font: 14px/1 var(--mono);
+    }
+
+    .doc-tab:first-child { border-left: 1px solid var(--hair); }
+    .doc-tab.active {
+      background: var(--paper);
+      color: var(--ink);
+      border-top: 3px solid var(--clay);
+    }
+
+    .dirty-mark { color: var(--clay); font-size: 18px; line-height: 0; }
+    .lock { color: var(--ink-3); font-size: 12px; }
+
+    .editor-wrap {
+      min-height: 0;
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 1fr 65px;
+      background: var(--paper);
+    }
+
+    .editor {
+      min-width: 0;
+      overflow: hidden;
+      padding: 13px 0 15px;
+      background-image: linear-gradient(to right, transparent 0, transparent 75px, rgba(168,79,53,.11) 75px, rgba(168,79,53,.11) 76px, transparent 76px);
+    }
+
+    .breadcrumb {
+      height: 25px;
+      padding-left: 87px;
+      color: var(--ink-3);
+      font: 12px/1 var(--mono);
+    }
+
+    .code-line {
+      min-height: 22px;
+      display: grid;
+      grid-template-columns: 58px 20px minmax(0, 1fr);
+      align-items: center;
+      padding-right: 10px;
+      font: 14px/1.45 var(--mono);
+      white-space: pre;
+      position: relative;
+    }
+
+    .code-line:hover { background: rgba(191, 173, 143, .15); }
+    .code-line.changed { background: rgba(168, 79, 53, .055); }
+    .code-line.changed::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--clay);
+    }
+
+    .line-no {
+      text-align: right;
+      padding-right: 10px;
+      color: #918b7d;
+      user-select: none;
+    }
+    .fold { color: #9e9687; text-align: center; user-select: none; }
+    .src { overflow: hidden; text-overflow: clip; }
+    .kw { color: #8a3f2c; font-weight: 700; }
+    .str { color: #3e6952; }
+    .time { color: #4e6082; }
+    .num { color: #755b92; }
+    .name { color: #4b4d45; font-weight: 650; }
+
+    .agent-line {
+      box-shadow: inset 0 1px rgba(168,79,53,.18), inset 0 -1px rgba(168,79,53,.18);
+      background: rgba(232, 197, 181, .24);
+    }
+
+    .agent-caret {
+      display: inline-block;
+      width: 2px;
+      height: 17px;
+      margin: 0 1px -4px 0;
+      background: var(--clay);
+      animation: blink 1s steps(1) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .agent-flag {
+      position: absolute;
+      right: 77px;
+      top: 265px;
+      z-index: 2;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 9px;
+      background: var(--clay);
+      color: #fff9f1;
+      font: 700 12px/1 var(--sans);
+      box-shadow: 0 5px 12px rgba(91, 50, 35, .18);
+      transition: top .25s ease, opacity .2s ease;
+    }
+
+    .agent-avatar {
+      width: 18px;
+      height: 18px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: #fff9f1;
+      color: var(--clay-dark);
+      font: 800 10px/1 var(--mono);
+    }
+
+    .minimap {
+      border-left: 1px solid var(--hair);
+      padding: 18px 9px;
+      background: #f2ebdf;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .mini-line {
+      height: 3px;
+      background: #b9ae9e;
+      opacity: .8;
+    }
+    .mini-line.clay { background: var(--clay); }
+    .mini-line.green { background: var(--green); }
+    .mini-window {
+      height: 72px;
+      margin: 2px -3px;
+      border: 1px solid rgba(117,54,35,.45);
+      background: rgba(255,255,255,.18);
+    }
+
+    .ledger {
+      min-height: 0;
+      background: #eee6d8;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      overflow: hidden;
+    }
+
+    .ledger-head {
+      min-height: 94px;
+      padding: 14px 16px 11px;
+      border-bottom: 1px solid var(--hair);
+      background: #e3d7c5;
+    }
+
+    .ledger-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .ledger h2 {
+      margin: 3px 0 0;
+      font: 700 21px/1.05 var(--serif);
+    }
+
+    .validation {
+      border: 1px solid #89a08b;
+      background: var(--green-soft);
+      color: #355642;
+      padding: 7px 9px;
+      cursor: pointer;
+      font: 700 12px/1 var(--mono);
+      letter-spacing: .02em;
+    }
+
+    .revision {
+      margin-top: 9px;
+      color: var(--ink-3);
+      font: 12px/1.3 var(--mono);
+    }
+
+    .parsed {
+      padding: 13px 16px 11px;
+      border-bottom: 1px solid var(--hair);
+    }
+
+    .track-map {
+      margin-top: 9px;
+      display: grid;
+      grid-template-columns: 52px 1fr;
+      gap: 7px 9px;
+      align-items: center;
+    }
+
+    .track-name {
+      color: var(--ink-3);
+      font: 12px/1 var(--mono);
+    }
+
+    .track-line {
+      height: 19px;
+      display: flex;
+      gap: 2px;
+      position: relative;
+    }
+
+    .segment {
+      height: 100%;
+      border: 1px solid #9b8e79;
+      background: #d7c6aa;
+      min-width: 16px;
+    }
+    .segment.host { width: 46%; background: #becdbd; border-color: #809981; }
+    .segment.detail { width: 31%; background: var(--clay-soft); border-color: #bd7c63; }
+    .segment.hold { width: 12%; background: var(--amber-soft); border-color: #a88245; margin-left: 19%; }
+    .marker-pin {
+      position: absolute;
+      left: 42%;
+      top: -4px;
+      width: 2px;
+      height: 27px;
+      background: var(--clay-dark);
+    }
+
+    .parse-facts {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      margin-top: 12px;
+      border-top: 1px solid var(--hair);
+      border-left: 1px solid var(--hair);
+    }
+
+    .fact {
+      padding: 8px 7px;
+      border-right: 1px solid var(--hair);
+      border-bottom: 1px solid var(--hair);
+    }
+    .fact strong { display: block; font: 700 14px/1 var(--mono); }
+    .fact span { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-3); }
+
+    .queue {
+      min-height: 0;
+      padding: 12px 16px;
+      overflow: hidden;
+    }
+
+    .queue-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .queue-heading h3 {
+      margin: 0;
+      font: 700 16px/1 var(--serif);
+    }
+
+    .job-count {
+      font: 700 12px/1 var(--mono);
+      color: var(--ink-3);
+    }
+
+    .job {
+      border-top: 1px solid var(--hair);
+      padding: 9px 0 8px;
+    }
+
+    .job-top {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .job-name {
+      font: 700 13px/1.15 var(--mono);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .job-state {
+      font: 700 11px/1 var(--sans);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--green);
+    }
+
+    .job-state.queued { color: var(--amber); }
+    .job-state.canceled { color: var(--ink-3); }
+
+    .progress {
+      height: 4px;
+      margin-top: 7px;
+      background: #d7cbb9;
+      overflow: hidden;
+    }
+    .progress > i {
+      display: block;
+      width: 68%;
+      height: 100%;
+      background: var(--green);
+      transition: width .2s;
+    }
+
+    .job-meta {
+      margin-top: 5px;
+      display: flex;
+      justify-content: space-between;
+      color: var(--ink-3);
+      font-size: 12px;
+    }
+
+    .text-action {
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--clay-dark);
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      font-size: 12px;
+    }
+
+    .rail {
+      min-width: 0;
+      background: var(--charcoal);
+      color: #f4ecdf;
+      display: grid;
+      grid-template-rows: 42px 1fr;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .rail-head {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 17px;
+      padding: 0 18px;
+      border-bottom: 1px solid #4f5049;
+    }
+
+    .rail-title {
+      font: 700 15px/1 var(--serif);
+      color: #fff9ef;
+    }
+
+    .rail-readout {
+      color: #bdb9ae;
+      font: 12px/1 var(--mono);
+    }
+
+    .rail-readout strong {
+      color: #fff7eb;
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .rail-tools {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+    }
+
+    .rail-button {
+      height: 28px;
+      border: 1px solid #696a61;
+      background: transparent;
+      color: #eee7dc;
+      padding: 0 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .rail-button.active {
+      border-color: var(--clay-soft);
+      background: var(--clay);
+      color: white;
+    }
+
+    .timeline {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 84px 1fr;
+      padding: 9px 16px 11px 12px;
+      gap: 8px;
+      position: relative;
+    }
+
+    .track-labels {
+      padding-top: 23px;
+      display: grid;
+      grid-template-rows: 76px 28px;
+      gap: 8px;
+      color: #aca99f;
+      font: 12px/1 var(--mono);
+    }
+
+    .track-label {
+      border-top: 1px solid #4f5049;
+      padding-top: 8px;
+    }
+    .track-label small { display: block; margin-top: 4px; color: #77796f; font-size: 11px; }
+
+    .timeline-body {
+      min-width: 0;
+      position: relative;
+    }
+
+    .ruler {
+      height: 22px;
+      display: flex;
+      justify-content: space-between;
+      color: #8f9189;
+      font: 11px/1 var(--mono);
+      border-bottom: 1px solid #4f5049;
+    }
+
+    .filmstrip {
+      height: 76px;
+      display: grid;
+      grid-template-columns: repeat(10, minmax(60px, 1fr));
+      gap: 3px;
+      padding: 5px 0;
+      border-bottom: 1px solid #4f5049;
+    }
+
+    .frame {
+      min-width: 0;
+      border: 1px solid #56584f;
+      background: #393b35;
+      padding: 0;
+      overflow: hidden;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .frame:hover,
+    .frame.active { border-color: #e4c6ae; }
+
+    .frame-scene {
+      position: absolute;
+      inset: 3px;
+      background:
+        linear-gradient(155deg, transparent 46%, rgba(233,217,190,.18) 47%, rgba(233,217,190,.18) 59%, transparent 60%),
+        linear-gradient(90deg, #6e776b 0 28%, #333a34 28% 68%, #9a5a42 68% 100%);
+    }
+    .frame:nth-child(2n) .frame-scene {
+      background:
+        linear-gradient(20deg, transparent 0 42%, rgba(241,229,203,.22) 43% 54%, transparent 55%),
+        linear-gradient(90deg, #46504a 0 46%, #9b6950 46% 72%, #d0bea2 72%);
+    }
+    .frame:nth-child(3n) .frame-scene {
+      background:
+        radial-gradient(circle at 65% 42%, #cfb99a 0 12%, transparent 13%),
+        linear-gradient(115deg, #41473f 0 54%, #7d4739 54%);
+    }
+
+    .frame-code {
+      position: absolute;
+      left: 4px;
+      bottom: 3px;
+      background: rgba(25,27,24,.78);
+      color: #e8dece;
+      padding: 2px 4px;
+      font: 10px/1 var(--mono);
+    }
+
+    .overlay-track {
+      height: 28px;
+      display: grid;
+      grid-template-columns: 22% 12% 1fr;
+      gap: 3px;
+      padding: 4px 0 0;
+    }
+
+    .rail-clip {
+      display: flex;
+      align-items: center;
+      padding: 0 7px;
+      overflow: hidden;
+      background: #82613f;
+      color: #f2e8d8;
+      border: 1px solid #ad8a60;
+      font: 11px/1 var(--mono);
+      white-space: nowrap;
+    }
+    .rail-clip.hold { background: #6a725e; border-color: #92a085; }
+
+    .playhead {
+      position: absolute;
+      left: 42%;
+      top: 9px;
+      bottom: 4px;
+      width: 2px;
+      background: #df6e4b;
+      pointer-events: none;
+      transition: left .18s ease;
+      z-index: 4;
+    }
+    .playhead::before {
+      content: "";
+      position: absolute;
+      top: -2px;
+      left: -5px;
+      width: 12px;
+      height: 8px;
+      background: #df6e4b;
+      clip-path: polygon(0 0, 100% 0, 50% 100%);
+    }
+
+    .marker-note {
+      position: absolute;
+      left: 37%;
+      top: 8px;
+      transform: translateX(-100%);
+      color: #e0c79f;
+      font: 11px/1 var(--mono);
+      white-space: nowrap;
+    }
+
+    .statusbar {
+      display: grid;
+      grid-template-columns: 248px 1fr auto;
+      align-items: center;
+      background: var(--clay-dark);
+      color: #f8eee2;
+      font: 12px/1 var(--mono);
+    }
+
+    .status-left {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      background: #4b5e4e;
+    }
+
+    .status-mid,
+    .status-right {
+      display: flex;
+      align-items: center;
+      gap: 17px;
+      padding: 0 15px;
+    }
+
+    .status-right { gap: 14px; }
+    .status-dot { color: #a9ceb0; }
+
+    .toast {
+      position: absolute;
+      right: 18px;
+      top: 79px;
+      z-index: 10;
+      width: 310px;
+      padding: 13px 15px;
+      border: 1px solid var(--clay);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(-8px);
+      pointer-events: none;
+      transition: opacity .2s, transform .2s;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .toast strong {
+      display: block;
+      margin-bottom: 4px;
+      font: 700 15px/1.2 var(--serif);
+    }
+
+    .toast span { color: var(--ink-2); font-size: 13px; }
+
+    @media (max-width: 1439px), (max-height: 899px) {
+      #app {
+        transform-origin: top left;
+        transform: scale(var(--fit, 1));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="masthead">
+      <div class="brand">
+        <div class="brand-mark">VP</div>
+        <div>
+          <h1>Video Project Editor</h1>
+          <div class="eyebrow">Editorial Production Desk</div>
+        </div>
+      </div>
+
+      <div class="production-context">
+        <div class="context-block">
+          <span>Workspace</span>
+          <strong>Campaign Studio</strong>
+        </div>
+        <div class="context-block">
+          <span>Connection</span>
+          <strong class="live-signal"><i class="pulse"></i> MCP · live</strong>
+        </div>
+        <div class="context-block">
+          <span>Active project</span>
+          <strong id="active-project-label">aurora-launch</strong>
+        </div>
+        <div class="context-block">
+          <span>Validation</span>
+          <strong style="color:var(--green)">Valid · rev 42</strong>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="button" id="validate-button">Validate</button>
+        <button class="button primary" id="export-button">Queue export</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="folios" aria-label="Project folios">
+        <div class="workspace-title">
+          <div class="section-label">Project folios · 3</div>
+          <h2>Campaign Studio</h2>
+        </div>
+
+        <button class="folio active" data-project="aurora-launch" data-state="Modified · export running">
+          <span class="folio-head">
+            <span>
+              <span class="folio-name">aurora-launch</span>
+              <span class="folio-note">12 assets · rev 42 · modified</span>
+            </span>
+            <i class="state-dot modified"></i>
+          </span>
+          <span class="file-tree">
+            <span class="file-row selected" data-file="project.vpe">
+              <span class="chevron">◇</span><span>project.vpe</span><span class="count">M</span>
+            </span>
+            <span class="file-row"><span class="chevron">▸</span><span>assets/</span><span class="count">12</span></span>
+            <span class="file-row"><span class="chevron">▸</span><span>subtitles/</span><span class="count">2</span></span>
+            <span class="file-row readonly"><span class="chevron">▸</span><span>receipts/</span><span class="readonly-tag">READ</span></span>
+            <span class="file-row readonly"><span class="chevron">▸</span><span>exports/</span><span class="readonly-tag">READ</span></span>
+            <span class="file-row readonly"><span class="chevron">▸</span><span>.history/</span><span class="count">42</span></span>
+          </span>
+        </button>
+
+        <button class="folio" data-project="founder-story" data-state="Valid · idle">
+          <span class="folio-head">
+            <span>
+              <span class="folio-name">founder-story</span>
+              <span class="folio-note">8 assets · rev 17 · valid</span>
+            </span>
+            <i class="state-dot"></i>
+          </span>
+        </button>
+
+        <button class="folio" data-project="product-loop" data-state="Parser warning · line 26">
+          <span class="folio-head">
+            <span>
+              <span class="folio-name">product-loop</span>
+              <span class="folio-note">5 assets · rev 09 · 1 warning</span>
+            </span>
+            <i class="state-dot warning"></i>
+          </span>
+        </button>
+      </aside>
+
+      <section class="desk">
+        <div class="upper-desk">
+          <section class="manuscript" aria-label="Canonical document editor">
+            <nav class="document-strip" aria-label="Open virtual files">
+              <button class="doc-tab active"><span class="dirty-mark">•</span><span>project.vpe</span></button>
+              <button class="doc-tab"><span class="lock">LOCKED</span><span>receipts/rev-41.json</span></button>
+            </nav>
+
+            <div class="editor-wrap">
+              <div class="editor">
+                <div class="breadcrumb">Campaign Studio / aurora-launch / <strong>project.vpe</strong></div>
+                <div class="code-line changed"><span class="line-no">1</span><span class="fold">⌄</span><span class="src"><span class="kw">project</span> <span class="str">"Aurora Launch"</span> {</span></div>
+                <div class="code-line"><span class="line-no">2</span><span class="fold"></span><span class="src">  <span class="kw">canvas</span> <span class="num">1080x1920</span> @ <span class="num">30fps</span></span></div>
+                <div class="code-line"><span class="line-no">3</span><span class="fold"></span><span class="src">  <span class="kw">source</span> <span class="name">host</span> = <span class="str">"assets/host-take-03.mp4"</span></span></div>
+                <div class="code-line"><span class="line-no">4</span><span class="fold"></span><span class="src">  <span class="kw">source</span> <span class="name">detail</span> = <span class="str">"assets/product-detail.mp4"</span></span></div>
+                <div class="code-line"><span class="line-no">5</span><span class="fold"></span><span class="src"></span></div>
+                <div class="code-line"><span class="line-no">6</span><span class="fold">⌄</span><span class="src">  <span class="kw">timeline</span> {</span></div>
+                <div class="code-line"><span class="line-no">7</span><span class="fold">⌄</span><span class="src">    <span class="kw">track</span> <span class="name">main</span> {</span></div>
+                <div class="code-line"><span class="line-no">8</span><span class="fold"></span><span class="src">      <span class="kw">clip</span> host source <span class="time">00:00:00.600..00:00:06.800</span> at <span class="time">00:00:00.000</span></span></div>
+                <div class="code-line"><span class="line-no">9</span><span class="fold"></span><span class="src">      <span class="kw">cut</span> at <span class="time">00:00:03.120</span></span></div>
+                <div class="code-line"><span class="line-no">10</span><span class="fold"></span><span class="src">      <span class="kw">clip</span> detail source <span class="time">00:00:01.400..00:00:05.900</span> at <span class="time">00:00:06.200</span></span></div>
+                <div class="code-line changed agent-line"><span class="line-no">11</span><span class="fold"></span><span class="src">      <span class="kw">transition</span> cross_dissolve at <span class="time">00:00:06.200</span> duration <span class="num">12f</span><span class="agent-caret"></span></span></div>
+                <div class="code-line"><span class="line-no">12</span><span class="fold"></span><span class="src">    }</span></div>
+                <div class="code-line"><span class="line-no">13</span><span class="fold">⌄</span><span class="src">    <span class="kw">track</span> <span class="name">overlay</span> {</span></div>
+                <div class="code-line"><span class="line-no">14</span><span class="fold"></span><span class="src">      <span class="kw">hold</span> host at <span class="time">00:00:02.500..00:00:03.200</span> source_time <span class="time">00:00:02.800</span></span></div>
+                <div class="code-line"><span class="line-no">15</span><span class="fold"></span><span class="src">    }</span></div>
+                <div class="code-line"><span class="line-no">16</span><span class="fold"></span><span class="src">  }</span></div>
+                <div class="code-line"><span class="line-no">17</span><span class="fold"></span><span class="src"></span></div>
+                <div class="code-line"><span class="line-no">18</span><span class="fold"></span><span class="src">  <span class="kw">marker</span> <span class="str">"Opening hook"</span> at <span class="time">00:00:03.000</span></span></div>
+                <div class="code-line"><span class="line-no">19</span><span class="fold"></span><span class="src">  <span class="kw">variant</span> <span class="str">"ZH-EN"</span> aspect <span class="num">9:16</span> subtitles <span class="str">"subs.zh-en.ass"</span></span></div>
+                <div class="code-line changed"><span class="line-no">20</span><span class="fold"></span><span class="src">  <span class="kw">gate</span> pre_render require opening_hook, continuous_timeline</span></div>
+                <div class="code-line"><span class="line-no">21</span><span class="fold"></span><span class="src">}</span></div>
+              </div>
+
+              <div class="minimap" aria-label="Document minimap">
+                <span class="mini-line clay" style="width:82%"></span>
+                <span class="mini-line" style="width:64%"></span>
+                <span class="mini-line green" style="width:94%"></span>
+                <span class="mini-line green" style="width:87%"></span>
+                <span class="mini-line" style="width:22%"></span>
+                <span class="mini-window"></span>
+                <span class="mini-line" style="width:92%"></span>
+                <span class="mini-line clay" style="width:75%"></span>
+                <span class="mini-line" style="width:34%"></span>
+                <span class="mini-line green" style="width:80%"></span>
+                <span class="mini-line" style="width:62%"></span>
+              </div>
+
+              <div class="agent-flag" id="agent-flag">
+                <span class="agent-avatar">A</span>
+                <span>Agent · editing line 11</span>
+              </div>
+            </div>
+          </section>
+
+          <aside class="ledger" aria-label="Production ledger">
+            <div class="ledger-head">
+              <div class="ledger-title">
+                <div>
+                  <div class="section-label">Production ledger</div>
+                  <h2>Aurora Launch</h2>
+                </div>
+                <button class="validation" id="validation-pill">VALID · 42</button>
+              </div>
+              <div class="revision">Atomic revision · audit receipt pending</div>
+            </div>
+
+            <section class="parsed">
+              <div class="section-label">Parsed sequence · inspection only</div>
+              <div class="track-map">
+                <span class="track-name">main</span>
+                <div class="track-line">
+                  <i class="segment host"></i><i class="segment detail"></i><i class="marker-pin"></i>
+                </div>
+                <span class="track-name">overlay</span>
+                <div class="track-line"><i class="segment hold"></i></div>
+              </div>
+              <div class="parse-facts">
+                <div class="fact"><strong>2</strong><span>sources</span></div>
+                <div class="fact"><strong>1</strong><span>transition</span></div>
+                <div class="fact"><strong>1/1</strong><span>gates pass</span></div>
+                <div class="fact"><strong>9:16</strong><span>canvas</span></div>
+                <div class="fact"><strong>30</strong><span>frames/sec</span></div>
+                <div class="fact"><strong>10.7s</strong><span>duration</span></div>
+              </div>
+            </section>
+
+            <section class="queue" id="queue">
+              <div class="queue-heading">
+                <h3>Export queue</h3>
+                <span class="job-count" id="job-count">2 jobs</span>
+              </div>
+              <div class="job" id="running-job">
+                <div class="job-top">
+                  <span class="job-name">aurora-launch_zh-en_r42.mp4</span>
+                  <span class="job-state" id="running-state">RUNNING</span>
+                </div>
+                <div class="progress"><i id="running-progress"></i></div>
+                <div class="job-meta">
+                  <span id="running-meta">68% · 00:41 left</span>
+                  <button class="text-action" id="cancel-job">Cancel</button>
+                </div>
+              </div>
+              <div class="job">
+                <div class="job-top">
+                  <span class="job-name">founder-story_master_r17.mp4</span>
+                  <span class="job-state">COMPLETE</span>
+                </div>
+                <div class="job-meta">
+                  <span>Receipt #8f24 · 14:21</span>
+                  <button class="text-action">Open export</button>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </div>
+
+        <section class="rail" aria-label="Filmstrip timeline inspection rail">
+          <div class="rail-head">
+            <span class="rail-title">Filmstrip inspection rail</span>
+            <span class="rail-readout"><strong id="time-readout">00:00:03.120</strong> · Opening hook · frame 094</span>
+            <div class="rail-tools">
+              <button class="rail-button active" id="follow-agent">Following Agent</button>
+              <button class="rail-button" id="fit-sequence">Fit sequence</button>
+            </div>
+          </div>
+
+          <div class="timeline">
+            <div class="track-labels">
+              <div class="track-label">main<small>host → detail</small></div>
+              <div class="track-label">overlay<small>hold</small></div>
+            </div>
+            <div class="timeline-body" id="timeline-body">
+              <div class="ruler">
+                <span>00:00</span><span>00:02</span><span>00:04</span><span>00:06</span><span>00:08</span><span>00:10.7</span>
+              </div>
+              <div class="marker-note">Opening hook · 03:00</div>
+              <div class="filmstrip" id="filmstrip">
+                <button class="frame" data-time="00:00:00.000"><span class="frame-scene"></span><span class="frame-code">host 00</span></button>
+                <button class="frame" data-time="00:00:01.080"><span class="frame-scene"></span><span class="frame-code">host 01</span></button>
+                <button class="frame active" data-time="00:00:03.120"><span class="frame-scene"></span><span class="frame-code">cut 094</span></button>
+                <button class="frame" data-time="00:00:04.160"><span class="frame-scene"></span><span class="frame-code">host 04</span></button>
+                <button class="frame" data-time="00:00:05.240"><span class="frame-scene"></span><span class="frame-code">host 05</span></button>
+                <button class="frame" data-time="00:00:06.200"><span class="frame-scene"></span><span class="frame-code">mix 06</span></button>
+                <button class="frame" data-time="00:00:07.280"><span class="frame-scene"></span><span class="frame-code">detail 07</span></button>
+                <button class="frame" data-time="00:00:08.360"><span class="frame-scene"></span><span class="frame-code">detail 08</span></button>
+                <button class="frame" data-time="00:00:09.440"><span class="frame-scene"></span><span class="frame-code">detail 09</span></button>
+                <button class="frame" data-time="00:00:10.700"><span class="frame-scene"></span><span class="frame-code">end 10</span></button>
+              </div>
+              <div class="overlay-track">
+                <span></span><span class="rail-clip hold">hold · 00:02.500–03.200</span><span></span>
+              </div>
+              <div class="playhead" id="playhead"></div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <footer class="statusbar">
+      <div class="status-left">main @ rev-42 · modified</div>
+      <div class="status-mid">
+        <span>Ln 11, Col 82</span>
+        <span>UTF-8</span>
+        <span>VPE parser 0.4.2</span>
+        <span>30 fps</span>
+        <span>00:00:10.700</span>
+      </div>
+      <div class="status-right"><span class="status-dot">●</span><span>Agent connected</span><span>MCP 24 ms</span></div>
+    </footer>
+
+    <div class="toast" id="toast" role="status">
+      <strong id="toast-title">Revision validated</strong>
+      <span id="toast-message">All gates passed at revision 42.</span>
+    </div>
+  </div>
+
+  <script>
+    const app = document.getElementById('app');
+    const toast = document.getElementById('toast');
+    let toastTimer;
+
+    function fitCanvas() {
+      const fit = Math.min(window.innerWidth / 1440, window.innerHeight / 900, 1);
+      document.documentElement.style.setProperty('--fit', fit);
+    }
+
+    function showToast(title, message) {
+      document.getElementById('toast-title').textContent = title;
+      document.getElementById('toast-message').textContent = message;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+    }
+
+    document.querySelectorAll('.folio').forEach((folio) => {
+      folio.addEventListener('click', (event) => {
+        if (event.target.closest('.file-row')) return;
+        document.querySelectorAll('.folio').forEach((item) => item.classList.remove('active'));
+        folio.classList.add('active');
+        const project = folio.dataset.project;
+        document.getElementById('active-project-label').textContent = project;
+        showToast(project, folio.dataset.state);
+      });
+    });
+
+    document.querySelectorAll('.file-row').forEach((row) => {
+      row.addEventListener('click', (event) => {
+        event.stopPropagation();
+        document.querySelectorAll('.file-row').forEach((item) => item.classList.remove('selected'));
+        row.classList.add('selected');
+        showToast(row.textContent.trim(), row.classList.contains('readonly') ? 'Generated folder · read-only' : 'Virtual project path selected');
+      });
+    });
+
+    document.querySelectorAll('.frame').forEach((frame, index) => {
+      frame.addEventListener('click', () => {
+        document.querySelectorAll('.frame').forEach((item) => item.classList.remove('active'));
+        frame.classList.add('active');
+        document.getElementById('playhead').style.left = `${(index + .5) * 10}%`;
+        document.getElementById('time-readout').textContent = frame.dataset.time;
+      });
+    });
+
+    document.getElementById('follow-agent').addEventListener('click', (event) => {
+      event.currentTarget.classList.toggle('active');
+      event.currentTarget.textContent = event.currentTarget.classList.contains('active') ? 'Following Agent' : 'Follow Agent';
+      document.getElementById('agent-flag').style.opacity = event.currentTarget.classList.contains('active') ? '1' : '.45';
+      showToast('Agent presence', event.currentTarget.classList.contains('active') ? 'Viewport follows live Agent edits.' : 'Agent remains visible; viewport follow is paused.');
+    });
+
+    document.getElementById('fit-sequence').addEventListener('click', () => {
+      document.getElementById('playhead').style.left = '42%';
+      document.getElementById('time-readout').textContent = '00:00:03.120';
+      showToast('Sequence fitted', 'Full 10.7 second timeline is visible.');
+    });
+
+    function validateRevision() {
+      const pill = document.getElementById('validation-pill');
+      pill.textContent = 'CHECKING…';
+      setTimeout(() => {
+        pill.textContent = 'VALID · 42';
+        showToast('Revision validated', 'No parser errors · pre-render gate 1/1 passed.');
+      }, 550);
+    }
+
+    document.getElementById('validate-button').addEventListener('click', validateRevision);
+    document.getElementById('validation-pill').addEventListener('click', validateRevision);
+
+    document.getElementById('export-button').addEventListener('click', () => {
+      if (document.getElementById('queued-job')) {
+        showToast('Already queued', 'Aurora Launch revision 42 is waiting behind the running export.');
+        return;
+      }
+      const job = document.createElement('div');
+      job.className = 'job';
+      job.id = 'queued-job';
+      job.innerHTML = `
+        <div class="job-top">
+          <span class="job-name">aurora-launch_zh-en_r42_v2.mp4</span>
+          <span class="job-state queued">QUEUED</span>
+        </div>
+        <div class="job-meta"><span>Revision 42 · no overwrite</span><button class="text-action" id="cancel-queued">Cancel</button></div>
+      `;
+      document.getElementById('queue').appendChild(job);
+      document.getElementById('job-count').textContent = '3 jobs';
+      document.getElementById('cancel-queued').addEventListener('click', () => {
+        job.remove();
+        document.getElementById('job-count').textContent = '2 jobs';
+        showToast('Queued export removed', 'No output was created.');
+      });
+      showToast('Export queued', 'Validated revision 42 · atomic no-overwrite output.');
+    });
+
+    document.getElementById('cancel-job').addEventListener('click', () => {
+      document.getElementById('running-state').textContent = 'CANCELED';
+      document.getElementById('running-state').className = 'job-state canceled';
+      document.getElementById('running-progress').style.width = '68%';
+      document.getElementById('running-progress').style.background = '#77776d';
+      document.getElementById('running-meta').textContent = 'Canceled safely · partial discarded';
+      document.getElementById('cancel-job').remove();
+      showToast('Export canceled', 'Partial output discarded; revision 42 is unchanged.');
+    });
+
+    fitCanvas();
+    window.addEventListener('resize', fitCanvas);
+  </script>
+</body>
+</html>
