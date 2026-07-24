@@ -1,0 +1,1399 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Project Editor — Native Code Workbench</title>
+  <!--
+    Direction A: Native Code Workbench
+    Assumptions:
+    - The operator is supervising a live agent on a 1440 × 900 desktop.
+    - project.vpe is the only writable source of truth; generated folders stay inspectable and read-only.
+    - Familiar editor grammar should lower learning cost, while revision, validation, queue, and agent state remain continuously visible.
+    Form:
+    - The design grows from the product's "video project as compilable text" model.
+    - Native workbench density, restrained graphite surfaces, and amber/green state color make operational evidence legible without becoming a neon AI dashboard.
+  -->
+  <style>
+    :root {
+      --frame-w: 1440px;
+      --frame-h: 900px;
+      --bg-0: #171918;
+      --bg-1: #1d201e;
+      --bg-2: #242724;
+      --bg-3: #2b2e2a;
+      --bg-hover: #33372f;
+      --line: #3b3f39;
+      --line-soft: #30332f;
+      --text: #e7e9e2;
+      --text-2: #bdc1b8;
+      --text-3: #8f958b;
+      --muted: #72786f;
+      --green: #8eae86;
+      --green-strong: #a9c79f;
+      --amber: #d4a85a;
+      --amber-soft: #7a6337;
+      --clay: #ca8469;
+      --blue: #8faec0;
+      --violet: #b5a2c5;
+      --red: #d27676;
+      --selection: #35483f;
+      --sans: "Segoe UI", "Noto Sans", "Liberation Sans", system-ui, sans-serif;
+      --mono: "Cascadia Mono", "SFMono-Regular", "Liberation Mono", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #0f1110;
+      color: var(--text);
+      font-family: var(--sans);
+    }
+
+    button {
+      color: inherit;
+      font: inherit;
+    }
+
+    button:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 2px solid var(--green-strong);
+      outline-offset: -2px;
+    }
+
+    .stage {
+      width: var(--frame-w);
+      height: var(--frame-h);
+      position: absolute;
+      inset: 50% auto auto 50%;
+      transform: translate(-50%, -50%);
+      transform-origin: center;
+      overflow: hidden;
+      background: var(--bg-1);
+      border: 1px solid #0b0c0b;
+      box-shadow: 0 24px 80px rgba(0,0,0,.52);
+      display: grid;
+      grid-template-rows: 42px 1fr 24px;
+    }
+
+    .product-bar {
+      display: grid;
+      grid-template-columns: 320px 1fr auto;
+      align-items: center;
+      min-width: 0;
+      padding: 0 10px 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: #20231f;
+      user-select: none;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: .01em;
+    }
+
+    .brand-mark {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border: 1px solid #687064;
+      background: #292e28;
+      color: var(--green-strong);
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .product-context {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      color: var(--text-2);
+      font-size: 13px;
+    }
+
+    .context-sep { color: #5e645c; }
+
+    .top-state,
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .top-actions { justify-content: flex-end; }
+
+    .state-pill {
+      height: 26px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      background: #252924;
+      color: var(--text-2);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      flex: none;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 2px rgba(142,174,134,.12);
+    }
+
+    .dot.amber { background: var(--amber); box-shadow: none; }
+
+    .export-btn {
+      height: 28px;
+      padding: 0 13px;
+      border: 1px solid #93ad8c;
+      background: var(--green);
+      color: #172018;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .export-btn:hover { background: var(--green-strong); }
+    .export-btn[disabled] { cursor: default; opacity: .78; }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 48px 252px minmax(0, 1fr);
+    }
+
+    .activity-bar {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: stretch;
+      background: #1b1d1b;
+      border-right: 1px solid var(--line);
+      user-select: none;
+    }
+
+    .activity-group {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .activity-btn {
+      position: relative;
+      width: 48px;
+      height: 48px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: #8e958b;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+    }
+
+    .activity-btn:hover { color: var(--text); background: #222522; }
+
+    .activity-btn.active {
+      color: var(--text);
+      background: #252825;
+    }
+
+    .activity-btn.active::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 8px;
+      bottom: 8px;
+      width: 2px;
+      background: var(--green-strong);
+    }
+
+    .activity-icon {
+      width: 21px;
+      height: 21px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: square;
+      stroke-linejoin: miter;
+    }
+
+    .activity-badge {
+      position: absolute;
+      right: 5px;
+      bottom: 6px;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--clay);
+      color: #1d1816;
+      font: 700 10px var(--sans);
+    }
+
+    .side-panel {
+      min-width: 0;
+      overflow: hidden;
+      border-right: 1px solid var(--line);
+      background: #202320;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-title {
+      height: 36px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex: none;
+      color: var(--text-2);
+      font-size: 12px;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+
+    .panel-actions {
+      display: flex;
+      gap: 9px;
+      color: var(--text-3);
+      letter-spacing: 0;
+      font-size: 16px;
+    }
+
+    .side-content {
+      min-height: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .workspace-section {
+      height: 30px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 9px;
+      border-top: 1px solid var(--line-soft);
+      border-bottom: 1px solid var(--line-soft);
+      background: #252825;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .035em;
+      text-transform: uppercase;
+    }
+
+    .chevron {
+      width: 10px;
+      color: var(--text-3);
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .project {
+      border-bottom: 1px solid #292c29;
+    }
+
+    .project-head {
+      width: 100%;
+      height: 32px;
+      padding: 0 9px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      border: 0;
+      background: transparent;
+      color: var(--text-2);
+      text-align: left;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .project-head:hover { background: var(--bg-hover); }
+    .project.active > .project-head { color: var(--text); }
+
+    .folder-mark {
+      width: 14px;
+      height: 10px;
+      position: relative;
+      border: 1px solid #879083;
+      background: #2a2e29;
+    }
+
+    .folder-mark::before {
+      content: "";
+      position: absolute;
+      left: -1px;
+      top: -4px;
+      width: 7px;
+      height: 3px;
+      border: 1px solid #879083;
+      border-bottom: 0;
+      background: #2a2e29;
+    }
+
+    .project-name {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .project-state {
+      font: 700 11px var(--mono);
+      color: var(--amber);
+    }
+
+    .project-state.valid { color: var(--green-strong); }
+    .project-state.warning { color: var(--clay); }
+
+    .tree {
+      padding: 1px 0 5px;
+    }
+
+    .project.collapsed .tree { display: none; }
+
+    .tree-row {
+      height: 25px;
+      padding: 0 8px 0 32px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--text-2);
+      font-size: 13px;
+      cursor: pointer;
+      border-left: 2px solid transparent;
+    }
+
+    .tree-row:hover { background: #2b2f2a; }
+
+    .tree-row.selected {
+      background: #353b33;
+      color: #f2f3ed;
+      border-left-color: var(--green-strong);
+    }
+
+    .tree-icon {
+      width: 15px;
+      color: var(--text-3);
+      text-align: center;
+      font: 12px var(--mono);
+    }
+
+    .tree-icon.code { color: var(--amber); }
+    .tree-icon.asset { color: var(--blue); }
+    .tree-icon.lock { color: var(--muted); }
+    .tree-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tree-meta { color: var(--muted); font-size: 11px; }
+
+    .side-placeholder {
+      display: none;
+      height: 100%;
+      padding: 14px 12px;
+      color: var(--text-3);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .side-placeholder.visible { display: block; }
+
+    .search-box {
+      width: 100%;
+      height: 30px;
+      margin-bottom: 12px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      background: #171a18;
+      color: var(--text);
+      font: 12px var(--mono);
+    }
+
+    .search-result {
+      padding: 8px;
+      border-top: 1px solid var(--line-soft);
+      color: var(--text-2);
+    }
+
+    .main {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 266px;
+      grid-template-rows: minmax(0, 1fr) 184px;
+      background: var(--bg-0);
+    }
+
+    .editor-shell {
+      min-width: 0;
+      min-height: 0;
+      border-right: 1px solid var(--line);
+      display: grid;
+      grid-template-rows: 37px 30px minmax(0, 1fr);
+    }
+
+    .tabs {
+      display: flex;
+      align-items: end;
+      min-width: 0;
+      overflow: hidden;
+      border-bottom: 1px solid var(--line);
+      background: #1d201e;
+    }
+
+    .tab {
+      height: 37px;
+      min-width: 144px;
+      max-width: 190px;
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 0;
+      border-right: 1px solid var(--line);
+      border-top: 2px solid transparent;
+      background: #202320;
+      color: var(--text-3);
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .tab:hover { background: #282c27; color: var(--text-2); }
+
+    .tab.active {
+      background: #181b19;
+      color: var(--text);
+      border-top-color: var(--green-strong);
+    }
+
+    .tab-icon { color: var(--amber); font-family: var(--mono); font-size: 11px; }
+    .tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tab-dirty { margin-left: auto; color: var(--amber); font-size: 15px; }
+    .tab-close { margin-left: auto; color: var(--text-3); }
+
+    .breadcrumbs {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 13px;
+      min-width: 0;
+      border-bottom: 1px solid var(--line-soft);
+      background: #191c1a;
+      color: var(--text-3);
+      font-size: 12px;
+      user-select: none;
+    }
+
+    .crumb-current { color: var(--text-2); }
+    .crumb-symbol { color: var(--amber); font-family: var(--mono); }
+
+    .editor {
+      position: relative;
+      min-height: 0;
+      overflow: hidden;
+      background: #181b19;
+      font-family: var(--mono);
+      font-size: 14px;
+      line-height: 21px;
+    }
+
+    .code-pane {
+      position: absolute;
+      inset: 0 58px 0 0;
+      padding: 10px 0 22px;
+      overflow: hidden;
+    }
+
+    .code-line {
+      position: relative;
+      height: 21px;
+      display: grid;
+      grid-template-columns: 50px 14px minmax(0, 1fr);
+      align-items: center;
+      white-space: pre;
+    }
+
+    .code-line:hover { background: rgba(255,255,255,.018); }
+
+    .code-line.active {
+      background: #222721;
+      box-shadow: inset 2px 0 var(--green);
+    }
+
+    .code-line.changed::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--amber);
+    }
+
+    .line-no {
+      padding-right: 12px;
+      color: #646a63;
+      text-align: right;
+      user-select: none;
+    }
+
+    .code-line.active .line-no { color: #afb5ac; }
+    .fold { color: #596159; text-align: center; user-select: none; }
+    .code { overflow: visible; color: #cfd3ca; }
+    .kw { color: #b5a2c5; }
+    .type { color: #8faec0; }
+    .str { color: #b9bc80; }
+    .num { color: #d4a85a; }
+    .id { color: #d8c7b4; }
+    .op { color: #82968a; }
+
+    .diagnostic {
+      border-bottom: 1px wavy var(--amber);
+      text-decoration-skip-ink: none;
+    }
+
+    .agent-cursor {
+      position: absolute;
+      left: 544px;
+      top: 220px;
+      width: 2px;
+      height: 21px;
+      background: var(--clay);
+      z-index: 5;
+      animation: cursorBlink 1.15s steps(1) infinite;
+    }
+
+    .agent-cursor::before {
+      content: "Agent · editing";
+      position: absolute;
+      left: 0;
+      bottom: 20px;
+      padding: 3px 6px;
+      background: var(--clay);
+      color: #211914;
+      font: 700 11px var(--sans);
+      white-space: nowrap;
+    }
+
+    @keyframes cursorBlink {
+      0%, 62% { opacity: 1; }
+      63%, 100% { opacity: .38; }
+    }
+
+    .minimap {
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: 58px;
+      padding: 10px 6px;
+      border-left: 1px solid #242824;
+      background: #171917;
+      overflow: hidden;
+    }
+
+    .mini-line {
+      height: 3px;
+      margin-bottom: 2px;
+      background: #535a52;
+      opacity: .7;
+    }
+
+    .mini-line.k { background: #776d82; }
+    .mini-line.s { background: #7b7d5f; }
+    .mini-line.n { background: #8a7042; }
+    .mini-viewport {
+      position: absolute;
+      left: 2px;
+      right: 2px;
+      top: 7px;
+      height: 100px;
+      border: 1px solid rgba(169,199,159,.4);
+      background: rgba(169,199,159,.04);
+    }
+
+    .readonly-view {
+      display: none;
+      height: 100%;
+      padding: 22px 24px;
+      color: var(--text-2);
+      font-family: var(--sans);
+    }
+
+    .readonly-view.visible { display: block; }
+
+    .readonly-kicker {
+      margin-bottom: 8px;
+      color: var(--amber);
+      font: 700 12px var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .readonly-view h2 {
+      margin: 0 0 14px;
+      color: var(--text);
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .receipt-table {
+      width: 100%;
+      border-collapse: collapse;
+      font: 12px var(--mono);
+    }
+
+    .receipt-table th,
+    .receipt-table td {
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      text-align: left;
+    }
+
+    .receipt-table th {
+      color: var(--text-3);
+      background: #222522;
+      font-family: var(--sans);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+
+    .right-panel {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: #202320;
+    }
+
+    .right-tabs {
+      height: 37px;
+      flex: none;
+      display: flex;
+      align-items: stretch;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .right-tab {
+      flex: 1;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      color: var(--text-3);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      cursor: pointer;
+    }
+
+    .right-tab:hover { color: var(--text-2); background: #272a27; }
+
+    .right-tab.active {
+      color: var(--text);
+      border-bottom-color: var(--green);
+    }
+
+    .right-view {
+      min-height: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .outline-view,
+    .agents-view { height: 100%; }
+    .agents-view { display: none; padding: 12px; }
+
+    .outline-summary {
+      height: 58px;
+      padding: 9px 11px;
+      border-bottom: 1px solid var(--line-soft);
+      background: #242724;
+    }
+
+    .outline-summary strong {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .outline-meta {
+      display: flex;
+      gap: 10px;
+      color: var(--text-3);
+      font-size: 12px;
+    }
+
+    .outline-tree { padding: 6px 0; }
+
+    .outline-row {
+      height: 25px;
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--text-2);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .outline-row:hover { background: var(--bg-hover); color: var(--text); }
+    .outline-row.indent-1 { padding-left: 23px; }
+    .outline-row.indent-2 { padding-left: 38px; }
+    .outline-row.indent-3 { padding-left: 53px; }
+
+    .outline-type {
+      width: 18px;
+      color: var(--amber);
+      font: 10px var(--mono);
+      text-transform: uppercase;
+    }
+
+    .outline-duration {
+      margin-left: auto;
+      color: var(--muted);
+      font: 11px var(--mono);
+    }
+
+    .presence-card {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr);
+      gap: 9px;
+      padding: 10px;
+      margin-bottom: 10px;
+      border: 1px solid var(--line);
+      background: #252825;
+    }
+
+    .avatar {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      background: #3a2d27;
+      border: 1px solid var(--clay);
+      color: #e7b29e;
+      font: 700 11px var(--mono);
+    }
+
+    .avatar.human {
+      background: #263129;
+      border-color: var(--green);
+      color: var(--green-strong);
+    }
+
+    .presence-name { font-size: 13px; font-weight: 650; }
+    .presence-meta { margin-top: 4px; color: var(--text-3); font-size: 12px; line-height: 1.35; }
+
+    .live-note {
+      padding: 9px;
+      border-left: 2px solid var(--clay);
+      background: #2b2724;
+      color: var(--text-2);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .bottom-panel {
+      grid-column: 1 / -1;
+      min-width: 0;
+      min-height: 0;
+      border-top: 1px solid var(--line);
+      background: #1d201e;
+      display: grid;
+      grid-template-rows: 34px minmax(0, 1fr);
+    }
+
+    .bottom-head {
+      display: flex;
+      align-items: stretch;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .bottom-tab {
+      position: relative;
+      padding: 0 15px;
+      border: 0;
+      border-top: 2px solid transparent;
+      background: transparent;
+      color: var(--text-3);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      cursor: pointer;
+    }
+
+    .bottom-tab:hover { color: var(--text-2); }
+
+    .bottom-tab.active {
+      color: var(--text);
+      border-top-color: var(--green);
+    }
+
+    .count {
+      margin-left: 5px;
+      padding: 1px 5px;
+      border-radius: 8px;
+      background: #373b36;
+      color: var(--text-2);
+      font-size: 10px;
+    }
+
+    .bottom-spacer { flex: 1; }
+
+    .panel-collapse {
+      width: 36px;
+      border: 0;
+      background: transparent;
+      color: var(--text-3);
+      cursor: pointer;
+    }
+
+    .bottom-content {
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .bottom-view { display: none; height: 100%; }
+    .bottom-view.active { display: block; }
+
+    .problem-row {
+      height: 35px;
+      padding: 0 13px;
+      display: grid;
+      grid-template-columns: 22px minmax(0, 1fr) 190px 82px;
+      align-items: center;
+      border-bottom: 1px solid #292c29;
+      color: var(--text-2);
+      font-size: 12px;
+    }
+
+    .problem-severity { color: var(--amber); font-size: 15px; }
+    .problem-file { color: var(--text-3); font-family: var(--mono); }
+    .problem-line { color: var(--muted); font-family: var(--mono); text-align: right; }
+
+    .queue-grid {
+      display: grid;
+      grid-template-columns: 1.25fr .8fr .65fr 1fr .55fr;
+      height: 100%;
+      font-size: 12px;
+    }
+
+    .queue-cell {
+      min-width: 0;
+      height: 35px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid #292c29;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .queue-head {
+      height: 28px;
+      color: var(--text-3);
+      background: #222522;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+
+    .queue-status { gap: 7px; }
+    .queue-link { color: var(--blue); cursor: pointer; }
+
+    .progress-track {
+      width: 100%;
+      height: 5px;
+      background: #3b3e3a;
+    }
+
+    .progress-fill {
+      width: 64%;
+      height: 100%;
+      background: var(--green);
+    }
+
+    .cancel-btn {
+      padding: 3px 7px;
+      border: 1px solid var(--line);
+      background: #282b28;
+      color: var(--text-2);
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .cancel-btn:hover { border-color: var(--red); color: #e1a0a0; }
+
+    .output-log {
+      padding: 8px 12px;
+      color: var(--text-2);
+      font: 12px/1.7 var(--mono);
+    }
+
+    .log-time { color: var(--muted); }
+    .log-ok { color: var(--green-strong); }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      background: #556850;
+      color: #f2f5ef;
+      font-size: 12px;
+      user-select: none;
+    }
+
+    .status-item {
+      height: 24px;
+      padding: 0 9px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .status-item:hover { background: rgba(255,255,255,.11); }
+    .status-spacer { flex: 1; min-width: 10px; }
+    .status-agent { background: rgba(25,30,24,.28); }
+    .status-warn { color: #fff1cb; }
+  </style>
+</head>
+<body>
+  <main class="stage" id="stage" aria-label="Video Project Editor prototype">
+    <header class="product-bar">
+      <div class="brand">
+        <div class="brand-mark">VP</div>
+        <span>Video Project Editor</span>
+      </div>
+      <div class="product-context">
+        <span>Campaign Studio</span>
+        <span class="context-sep">/</span>
+        <span>aurora-launch</span>
+        <span class="context-sep">/</span>
+        <span>rev 42</span>
+      </div>
+      <div class="top-actions">
+        <div class="state-pill"><span class="dot"></span>Agent connected</div>
+        <div class="state-pill" id="validationPill"><span class="dot"></span>Validated · rev 42</div>
+        <button class="export-btn" id="exportButton">Export vertical master</button>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <nav class="activity-bar" aria-label="Activity">
+        <div class="activity-group">
+          <button class="activity-btn active" data-side="explorer" aria-label="Explorer" title="Explorer">
+            <svg class="activity-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h6l2 3h8v15H4z"/><path d="M4 8h16"/></svg>
+          </button>
+          <button class="activity-btn" data-side="search" aria-label="Search" title="Search">
+            <svg class="activity-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
+          </button>
+          <button class="activity-btn" data-side="revisions" aria-label="Revisions" title="Revisions">
+            <svg class="activity-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2M7 4 4 7"/></svg>
+            <span class="activity-badge">3</span>
+          </button>
+          <button class="activity-btn" data-side="jobs" aria-label="Jobs" title="Jobs">
+            <svg class="activity-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5zM9 9h6v6H9z"/></svg>
+          </button>
+        </div>
+        <div class="activity-group">
+          <button class="activity-btn" aria-label="Settings" title="Settings">
+            <svg class="activity-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1"/></svg>
+          </button>
+        </div>
+      </nav>
+
+      <aside class="side-panel">
+        <div class="panel-title">
+          <span id="sideTitle">Explorer</span>
+          <span class="panel-actions"><span>+</span><span>···</span></span>
+        </div>
+        <div class="side-content" id="explorerView">
+          <div class="workspace-section"><span class="chevron">▾</span>Campaign Studio</div>
+
+          <div class="project active" data-project="aurora-launch">
+            <button class="project-head">
+              <span class="chevron">▾</span><span class="folder-mark"></span>
+              <span class="project-name">aurora-launch</span>
+              <span class="project-state">M · 64%</span>
+            </button>
+            <div class="tree">
+              <div class="tree-row selected" data-file="project.vpe" tabindex="0">
+                <span class="tree-icon code">V</span><span class="tree-label">project.vpe</span><span class="tree-meta">M</span>
+              </div>
+              <div class="tree-row" data-file="assets" tabindex="0">
+                <span class="tree-icon asset">▱</span><span class="tree-label">assets</span><span class="tree-meta">7</span>
+              </div>
+              <div class="tree-row" data-file="subs.zh-en.ass" tabindex="0">
+                <span class="tree-icon">S</span><span class="tree-label">subs.zh-en.ass</span>
+              </div>
+              <div class="tree-row" data-file="receipts" tabindex="0">
+                <span class="tree-icon lock">◇</span><span class="tree-label">receipts</span><span class="tree-meta">12 ↗</span>
+              </div>
+              <div class="tree-row" data-file="exports" tabindex="0">
+                <span class="tree-icon lock">◇</span><span class="tree-label">exports</span><span class="tree-meta">3 ↗</span>
+              </div>
+              <div class="tree-row" data-file=".history" tabindex="0">
+                <span class="tree-icon lock">◇</span><span class="tree-label">.history</span><span class="tree-meta">42 ↗</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="project collapsed" data-project="founder-story">
+            <button class="project-head">
+              <span class="chevron">›</span><span class="folder-mark"></span>
+              <span class="project-name">founder-story</span>
+              <span class="project-state valid">VALID</span>
+            </button>
+            <div class="tree">
+              <div class="tree-row" data-file="founder-story/project.vpe"><span class="tree-icon code">V</span><span class="tree-label">project.vpe</span></div>
+              <div class="tree-row"><span class="tree-icon asset">▱</span><span class="tree-label">assets</span><span class="tree-meta">11</span></div>
+              <div class="tree-row"><span class="tree-icon lock">◇</span><span class="tree-label">exports</span><span class="tree-meta">1 ↗</span></div>
+            </div>
+          </div>
+
+          <div class="project collapsed" data-project="product-loop">
+            <button class="project-head">
+              <span class="chevron">›</span><span class="folder-mark"></span>
+              <span class="project-name">product-loop</span>
+              <span class="project-state warning">1 ⚠</span>
+            </button>
+            <div class="tree">
+              <div class="tree-row" data-file="product-loop/project.vpe"><span class="tree-icon code">V</span><span class="tree-label">project.vpe</span></div>
+              <div class="tree-row"><span class="tree-icon asset">▱</span><span class="tree-label">assets</span><span class="tree-meta">4</span></div>
+              <div class="tree-row"><span class="tree-icon lock">◇</span><span class="tree-label">receipts</span><span class="tree-meta">8 ↗</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="side-placeholder" id="searchView">
+          <input class="search-box" value="opening_hook" aria-label="Search projects">
+          <div class="search-result"><strong>project.vpe</strong><br>gate pre_render require <span style="color:var(--amber)">opening_hook</span></div>
+          <div class="search-result"><strong>receipt-r42.json</strong><br>quality gate passed</div>
+        </div>
+        <div class="side-placeholder" id="revisionsView">
+          <strong style="color:var(--text)">Revision history</strong>
+          <div class="search-result">rev 42 · Agent<br><span style="color:var(--muted)">transition duration → 12f</span></div>
+          <div class="search-result">rev 41 · Maya Chen<br><span style="color:var(--muted)">Added ZH-EN variant</span></div>
+          <div class="search-result">rev 40 · Agent<br><span style="color:var(--muted)">Opening hook marker</span></div>
+        </div>
+        <div class="side-placeholder" id="jobsView">
+          <strong style="color:var(--text)">Export jobs</strong>
+          <div class="search-result">exp-8F21 · Running 64%<br><span style="color:var(--muted)">vertical-master.mp4</span></div>
+          <div class="search-result">exp-8E94 · Completed<br><span style="color:var(--muted)">preview-r41.mp4</span></div>
+        </div>
+      </aside>
+
+      <section class="main">
+        <section class="editor-shell">
+          <div class="tabs" id="tabs">
+            <button class="tab active" data-tab="project.vpe"><span class="tab-icon">V</span><span class="tab-name">project.vpe</span><span class="tab-dirty">●</span></button>
+            <button class="tab" data-tab="subs.zh-en.ass"><span class="tab-icon" style="color:var(--blue)">S</span><span class="tab-name">subs.zh-en.ass</span><span class="tab-close">×</span></button>
+            <button class="tab" data-tab="receipt-r42.json"><span class="tab-icon" style="color:var(--green)">{} </span><span class="tab-name">receipt-r42.json</span><span class="tab-close">×</span></button>
+          </div>
+          <div class="breadcrumbs" id="breadcrumbs">
+            <span>Campaign Studio</span><span>›</span><span>aurora-launch</span><span>›</span>
+            <span class="crumb-current">project.vpe</span><span>›</span><span class="crumb-symbol">timeline</span>
+          </div>
+
+          <div class="editor" id="editor">
+            <div class="code-pane" id="codePane">
+              <div class="code-line changed"><span class="line-no">1</span><span class="fold">⌄</span><span class="code"><span class="kw">project</span> <span class="str">"Aurora Launch"</span> {</span></div>
+              <div class="code-line"><span class="line-no">2</span><span></span><span class="code">  <span class="kw">canvas</span> <span class="num">1080x1920</span> <span class="op">@</span> <span class="num">30fps</span></span></div>
+              <div class="code-line"><span class="line-no">3</span><span></span><span class="code">  <span class="kw">source</span> <span class="id">host</span> <span class="op">=</span> <span class="str">"assets/host-take-03.mp4"</span></span></div>
+              <div class="code-line"><span class="line-no">4</span><span></span><span class="code">  <span class="kw">source</span> <span class="id">detail</span> <span class="op">=</span> <span class="str">"assets/product-detail.mp4"</span></span></div>
+              <div class="code-line"><span class="line-no">5</span><span></span><span class="code"></span></div>
+              <div class="code-line changed"><span class="line-no">6</span><span class="fold">⌄</span><span class="code">  <span class="kw">timeline</span> {</span></div>
+              <div class="code-line"><span class="line-no">7</span><span class="fold">⌄</span><span class="code">    <span class="kw">track</span> <span class="type">main</span> {</span></div>
+              <div class="code-line"><span class="line-no">8</span><span></span><span class="code">      <span class="kw">clip</span> <span class="id">host</span> <span class="kw">source</span> <span class="num">00:00:00.600..00:00:06.800</span> <span class="kw">at</span> <span class="num">00:00:00.000</span></span></div>
+              <div class="code-line"><span class="line-no">9</span><span></span><span class="code">      <span class="kw">cut at</span> <span class="num">00:00:03.120</span></span></div>
+              <div class="code-line changed"><span class="line-no">10</span><span></span><span class="code">      <span class="kw">clip</span> <span class="id">detail</span> <span class="kw">source</span> <span class="num">00:00:01.400..00:00:05.900</span> <span class="kw">at</span> <span class="num">00:00:06.200</span></span></div>
+              <div class="code-line active changed"><span class="line-no">11</span><span></span><span class="code">      <span class="kw">transition</span> <span class="type">cross_dissolve</span> <span class="kw">at</span> <span class="num">00:00:06.200</span> <span class="kw">duration</span> <span class="num diagnostic">12f</span></span></div>
+              <div class="code-line"><span class="line-no">12</span><span></span><span class="code">    }</span></div>
+              <div class="code-line"><span class="line-no">13</span><span class="fold">⌄</span><span class="code">    <span class="kw">track</span> <span class="type">overlay</span> {</span></div>
+              <div class="code-line"><span class="line-no">14</span><span></span><span class="code">      <span class="kw">hold</span> <span class="id">host</span> <span class="kw">at</span> <span class="num">00:00:02.500..00:00:03.200</span> <span class="kw">source_time</span> <span class="num">00:00:02.800</span></span></div>
+              <div class="code-line"><span class="line-no">15</span><span></span><span class="code">    }</span></div>
+              <div class="code-line"><span class="line-no">16</span><span></span><span class="code">  }</span></div>
+              <div class="code-line"><span class="line-no">17</span><span></span><span class="code"></span></div>
+              <div class="code-line"><span class="line-no">18</span><span></span><span class="code">  <span class="kw">marker</span> <span class="str">"Opening hook"</span> <span class="kw">at</span> <span class="num">00:00:03.000</span></span></div>
+              <div class="code-line"><span class="line-no">19</span><span></span><span class="code">  <span class="kw">variant</span> <span class="str">"ZH-EN"</span> <span class="kw">aspect</span> <span class="num">9:16</span> <span class="kw">subtitles</span> <span class="str">"subs.zh-en.ass"</span></span></div>
+              <div class="code-line"><span class="line-no">20</span><span></span><span class="code">  <span class="kw">gate</span> <span class="type">pre_render</span> <span class="kw">require</span> <span class="id">opening_hook</span>, <span class="id">continuous_timeline</span></span></div>
+              <div class="code-line"><span class="line-no">21</span><span></span><span class="code">}</span></div>
+              <div class="agent-cursor" title="Agent is editing line 11"></div>
+            </div>
+
+            <aside class="minimap" aria-label="Document minimap">
+              <div class="mini-viewport"></div>
+              <div class="mini-line k" style="width:42px"></div><div class="mini-line n" style="width:29px"></div>
+              <div class="mini-line s" style="width:45px"></div><div class="mini-line s" style="width:40px"></div>
+              <div class="mini-line" style="width:8px"></div><div class="mini-line k" style="width:21px"></div>
+              <div class="mini-line k" style="width:27px"></div><div class="mini-line n" style="width:46px"></div>
+              <div class="mini-line n" style="width:24px"></div><div class="mini-line n" style="width:46px"></div>
+              <div class="mini-line k" style="width:48px"></div><div class="mini-line" style="width:12px"></div>
+              <div class="mini-line k" style="width:31px"></div><div class="mini-line n" style="width:45px"></div>
+              <div class="mini-line" style="width:12px"></div><div class="mini-line" style="width:8px"></div>
+              <div class="mini-line" style="width:5px"></div><div class="mini-line s" style="width:41px"></div>
+              <div class="mini-line s" style="width:48px"></div><div class="mini-line k" style="width:45px"></div>
+            </aside>
+
+            <div class="readonly-view" id="readonlyView">
+              <div class="readonly-kicker">Generated · read-only</div>
+              <h2 id="readonlyTitle">receipt-r42.json</h2>
+              <table class="receipt-table">
+                <thead><tr><th>Revision</th><th>Actor</th><th>Validation</th><th>Created</th></tr></thead>
+                <tbody>
+                  <tr><td>rev 42</td><td>Agent / video_editor</td><td style="color:var(--green-strong)">accepted</td><td>14:32:09</td></tr>
+                  <tr><td colspan="2">sha256: 2d09…f84c</td><td colspan="2">atomic write · no overwrite</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <aside class="right-panel">
+          <div class="right-tabs">
+            <button class="right-tab active" data-right="outline">Outline</button>
+            <button class="right-tab" data-right="agents">Agents <span class="count">2</span></button>
+          </div>
+          <div class="right-view">
+            <div class="outline-view" id="outlineView">
+              <div class="outline-summary">
+                <strong>Aurora Launch · 10.7s</strong>
+                <div class="outline-meta"><span>2 tracks</span><span>2 clips</span><span>1 variant</span></div>
+              </div>
+              <div class="outline-tree">
+                <div class="outline-row"><span class="chevron">▾</span><span class="outline-type">TL</span>timeline</div>
+                <div class="outline-row indent-1"><span class="chevron">▾</span><span class="outline-type">TR</span>main<span class="outline-duration">10.7s</span></div>
+                <div class="outline-row indent-2"><span class="outline-type">CL</span>host<span class="outline-duration">6.2s</span></div>
+                <div class="outline-row indent-3"><span class="outline-type">CUT</span>00:03.120</div>
+                <div class="outline-row indent-2"><span class="outline-type">CL</span>detail<span class="outline-duration">4.5s</span></div>
+                <div class="outline-row indent-3"><span class="outline-type">FX</span>cross_dissolve<span class="outline-duration">12f</span></div>
+                <div class="outline-row indent-1"><span class="chevron">▾</span><span class="outline-type">TR</span>overlay</div>
+                <div class="outline-row indent-2"><span class="outline-type">HD</span>host hold<span class="outline-duration">0.7s</span></div>
+                <div class="outline-row"><span class="outline-type">MK</span>Opening hook<span class="outline-duration">03.000</span></div>
+                <div class="outline-row"><span class="outline-type">VR</span>ZH-EN · 9:16</div>
+                <div class="outline-row"><span class="outline-type">GT</span>pre_render<span class="outline-duration" style="color:var(--green)">pass</span></div>
+              </div>
+            </div>
+
+            <div class="agents-view" id="agentsView">
+              <div class="presence-card">
+                <div class="avatar">AI</div>
+                <div><div class="presence-name">Video Agent <span style="color:var(--green)">●</span></div><div class="presence-meta">Editing project.vpe · line 11<br>via video_editor / write_file</div></div>
+              </div>
+              <div class="presence-card">
+                <div class="avatar human">MC</div>
+                <div><div class="presence-name">Maya Chen</div><div class="presence-meta">Viewing project.vpe · line 18<br>Workspace owner</div></div>
+              </div>
+              <div class="live-note">Optimistic revision <strong>42</strong> is locked for validation. Every accepted edit creates an audit receipt.</div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="bottom-panel" id="bottomPanel">
+          <div class="bottom-head">
+            <button class="bottom-tab active" data-bottom="problems">Problems <span class="count">1</span></button>
+            <button class="bottom-tab" data-bottom="queue">Queue <span class="count">2</span></button>
+            <button class="bottom-tab" data-bottom="output">Output</button>
+            <span class="bottom-spacer"></span>
+            <button class="panel-collapse" id="collapsePanel" title="Toggle panel">⌄</button>
+          </div>
+          <div class="bottom-content">
+            <div class="bottom-view active" id="problemsPanel">
+              <div class="problem-row">
+                <span class="problem-severity">⚠</span>
+                <span>Transition duration is shorter than the recommended 15 frames for the source cadence.</span>
+                <span class="problem-file">aurora-launch / project.vpe</span>
+                <span class="problem-line">[11, 78]</span>
+              </div>
+              <div class="problem-row">
+                <span style="color:var(--green)">✓</span>
+                <span>All required pre_render gates passed at revision 42.</span>
+                <span class="problem-file">continuous_timeline</span>
+                <span class="problem-line">validated</span>
+              </div>
+            </div>
+
+            <div class="bottom-view" id="queuePanel">
+              <div class="queue-grid" id="queueGrid">
+                <div class="queue-cell queue-head">Job</div><div class="queue-cell queue-head">State</div><div class="queue-cell queue-head">Progress</div><div class="queue-cell queue-head">Output</div><div class="queue-cell queue-head">Action</div>
+                <div class="queue-cell">exp-8F21 · vertical-master</div>
+                <div class="queue-cell queue-status"><span class="dot amber"></span>Running</div>
+                <div class="queue-cell"><div class="progress-track"><div class="progress-fill"></div></div></div>
+                <div class="queue-cell queue-link">exports/vertical-master.mp4</div>
+                <div class="queue-cell"><button class="cancel-btn" id="cancelJob">Cancel</button></div>
+                <div class="queue-cell">exp-8E94 · preview-r41</div>
+                <div class="queue-cell queue-status"><span class="dot"></span>Completed</div>
+                <div class="queue-cell">100%</div>
+                <div class="queue-cell queue-link">receipt · export</div>
+                <div class="queue-cell">—</div>
+              </div>
+            </div>
+
+            <div class="bottom-view" id="outputPanel">
+              <div class="output-log">
+                <span class="log-time">14:32:09.118</span> parser vpe/0.6.2 loaded revision 42<br>
+                <span class="log-time">14:32:09.146</span> <span class="log-ok">✓</span> opening_hook · continuous_timeline<br>
+                <span class="log-time">14:32:09.208</span> export exp-8F21 render pass 2/3 · 64%
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </section>
+
+    <footer class="status-bar">
+      <div class="status-item">⑂ main</div>
+      <div class="status-item">rev 42</div>
+      <div class="status-item status-warn">△ 1&nbsp;&nbsp;× 0</div>
+      <div class="status-item">MCP sandboxed</div>
+      <div class="status-spacer"></div>
+      <div class="status-item">Ln 11, Col 79</div>
+      <div class="status-item">UTF-8</div>
+      <div class="status-item">vpe/0.6.2</div>
+      <div class="status-item">30 fps</div>
+      <div class="status-item">00:00:10.700</div>
+      <div class="status-item status-agent"><span class="dot"></span>Agent live</div>
+    </footer>
+  </main>
+
+  <script>
+    (() => {
+      const stage = document.getElementById("stage");
+      const fitStage = () => {
+        const scale = Math.min(window.innerWidth / 1440, window.innerHeight / 900);
+        stage.style.transform = `translate(-50%, -50%) scale(${scale})`;
+      };
+      fitStage();
+      window.addEventListener("resize", fitStage);
+
+      const sideViews = {
+        explorer: document.getElementById("explorerView"),
+        search: document.getElementById("searchView"),
+        revisions: document.getElementById("revisionsView"),
+        jobs: document.getElementById("jobsView")
+      };
+
+      document.querySelectorAll("[data-side]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("[data-side]").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          Object.values(sideViews).forEach((view) => {
+            view.style.display = "none";
+            view.classList.remove("visible");
+          });
+          const name = button.dataset.side;
+          const view = sideViews[name];
+          view.style.display = name === "explorer" ? "block" : "";
+          view.classList.add("visible");
+          document.getElementById("sideTitle").textContent = name[0].toUpperCase() + name.slice(1);
+        });
+      });
+
+      document.querySelectorAll(".project-head").forEach((button) => {
+        button.addEventListener("click", () => {
+          const project = button.closest(".project");
+          project.classList.toggle("collapsed");
+          button.querySelector(".chevron").textContent = project.classList.contains("collapsed") ? "›" : "▾";
+        });
+      });
+
+      const codePane = document.getElementById("codePane");
+      const minimap = document.querySelector(".minimap");
+      const readonlyView = document.getElementById("readonlyView");
+      const readonlyTitle = document.getElementById("readonlyTitle");
+      const breadcrumbs = document.getElementById("breadcrumbs");
+
+      const showDocument = (name, readOnly = false) => {
+        document.querySelectorAll(".tree-row").forEach((row) => row.classList.toggle("selected", row.dataset.file === name));
+        if (!readOnly && name.endsWith("project.vpe")) {
+          codePane.style.display = "block";
+          minimap.style.display = "block";
+          readonlyView.classList.remove("visible");
+        } else {
+          codePane.style.display = "none";
+          minimap.style.display = "none";
+          readonlyView.classList.add("visible");
+          readonlyTitle.textContent = name;
+        }
+        breadcrumbs.innerHTML = `<span>Campaign Studio</span><span>›</span><span>aurora-launch</span><span>›</span><span class="crumb-current">${name}</span>${readOnly ? '<span>›</span><span class="crumb-symbol">read-only</span>' : ''}`;
+      };
+
+      document.querySelectorAll(".tree-row[data-file]").forEach((row) => {
+        row.addEventListener("click", () => {
+          const file = row.dataset.file;
+          const readOnly = ["receipts", "exports", ".history", "assets"].includes(file);
+          showDocument(file, readOnly);
+        });
+      });
+
+      document.querySelectorAll(".tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
+          tab.classList.add("active");
+          const name = tab.dataset.tab;
+          showDocument(name, name.includes("receipt"));
+        });
+      });
+
+      document.querySelectorAll("[data-right]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("[data-right]").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          const agents = button.dataset.right === "agents";
+          document.getElementById("outlineView").style.display = agents ? "none" : "block";
+          document.getElementById("agentsView").style.display = agents ? "block" : "none";
+        });
+      });
+
+      document.querySelectorAll("[data-bottom]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("[data-bottom]").forEach((item) => item.classList.remove("active"));
+          document.querySelectorAll(".bottom-view").forEach((view) => view.classList.remove("active"));
+          button.classList.add("active");
+          document.getElementById(`${button.dataset.bottom}Panel`).classList.add("active");
+        });
+      });
+
+      const exportButton = document.getElementById("exportButton");
+      exportButton.addEventListener("click", () => {
+        exportButton.textContent = "Queued · exp-8F38";
+        exportButton.disabled = true;
+        document.querySelector('[data-bottom="queue"]').click();
+      });
+
+      const cancelButton = document.getElementById("cancelJob");
+      cancelButton.addEventListener("click", () => {
+        cancelButton.textContent = "Cancelled";
+        cancelButton.disabled = true;
+        cancelButton.closest(".queue-grid").children[6].innerHTML = '<span style="color:var(--red)">Cancelled</span>';
+        cancelButton.closest(".queue-grid").children[7].textContent = "64%";
+      });
+
+      let collapsed = false;
+      document.getElementById("collapsePanel").addEventListener("click", (event) => {
+        collapsed = !collapsed;
+        document.querySelector(".main").style.gridTemplateRows = collapsed ? "minmax(0, 1fr) 34px" : "minmax(0, 1fr) 184px";
+        event.currentTarget.textContent = collapsed ? "⌃" : "⌄";
+      });
+    })();
+  </script>
+</body>
+</html>

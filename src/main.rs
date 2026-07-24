@@ -693,6 +693,9 @@ async fn cmd_serve(mut settings: Settings) -> Result<()> {
     let host = settings.host.clone();
     let port = settings.port;
     let studio = Arc::new(Studio::new(settings, database, engine, subtitles));
+    let render_worker = video_work_api::render_queue::start_worker(studio.clone())
+        .context("start exclusive render queue worker")?;
+    let render_shutdown = render_worker.shutdown_notifier();
     let state = AppState {
         studio,
         limiter: Arc::new(LoginLimiter::new()),
@@ -705,13 +708,17 @@ async fn cmd_serve(mut settings: Settings) -> Result<()> {
         .await
         .with_context(|| format!("bind {addr}"))?;
     tracing::info!("Video Work API listening on http://{addr}");
-    axum::serve(
+    let serve_result = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal(cancellation))
+    .with_graceful_shutdown(shutdown_signal(cancellation, render_shutdown))
     .await
-    .context("serve")?;
+    .context("serve");
+    render_worker.shutdown();
+    let worker_result = render_worker.wait().await;
+    serve_result?;
+    worker_result?;
     Ok(())
 }
 
@@ -757,7 +764,10 @@ async fn next_shutdown_signal(
     }
 }
 
-async fn shutdown_signal(cancellation: Arc<AtomicBool>) {
+async fn shutdown_signal(
+    cancellation: Arc<AtomicBool>,
+    render_shutdown: tokio::sync::watch::Sender<bool>,
+) {
     #[cfg(unix)]
     {
         let mut interrupt =
@@ -780,6 +790,7 @@ async fn shutdown_signal(cancellation: Arc<AtomicBool>) {
         let first = next_shutdown_signal(&mut interrupt, &mut terminate).await;
         let transition = advance_shutdown(&cancellation);
         debug_assert_eq!(transition, ShutdownTransition::BeginGraceful);
+        let _ = render_shutdown.send(true);
         tracing::info!(signal = first.exit_code() - 128, "begin graceful shutdown");
 
         tokio::spawn(async move {
@@ -795,6 +806,7 @@ async fn shutdown_signal(cancellation: Arc<AtomicBool>) {
         Ok(()) => {
             let transition = advance_shutdown(&cancellation);
             debug_assert_eq!(transition, ShutdownTransition::BeginGraceful);
+            let _ = render_shutdown.send(true);
             tokio::spawn(async move {
                 if tokio::signal::ctrl_c().await.is_ok()
                     && advance_shutdown(&cancellation) == ShutdownTransition::ForceExit

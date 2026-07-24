@@ -274,8 +274,15 @@ fn cleanup_stale_temps(parent: &Path, token_path: &Path) -> Result<()> {
         if Uuid::parse_str(suffix).is_err() {
             continue;
         }
-        let metadata =
-            fs::symlink_metadata(entry.path()).with_context(|| "inspect staged MCP token file")?;
+        let metadata = match fs::symlink_metadata(entry.path()) {
+            Ok(metadata) => metadata,
+            // Another concurrent ensure/rotate may remove its temporary entry
+            // after read_dir returned it. That is a successful cleanup race.
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error).with_context(|| "inspect staged MCP token file");
+            }
+        };
         if !metadata.is_file() || metadata.file_type().is_symlink() {
             continue;
         }
@@ -291,8 +298,13 @@ fn cleanup_stale_temps(parent: &Path, token_path: &Path) -> Result<()> {
             .and_then(|modified| modified.elapsed().ok())
             .is_some_and(|age| age >= Duration::from_secs(60 * 60));
         if stale {
-            fs::remove_file(entry.path()).with_context(|| "remove stale MCP token temp file")?;
-            removed = true;
+            match fs::remove_file(entry.path()) {
+                Ok(()) => removed = true,
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error).with_context(|| "remove stale MCP token temp file");
+                }
+            }
         }
     }
     if removed {
@@ -468,23 +480,71 @@ mod tests {
 
     #[test]
     fn concurrent_ensure_returns_one_stable_token() {
-        let root = tempdir().unwrap();
-        let path = Arc::new(root.path().join("mcp-token"));
-        let barrier = Arc::new(Barrier::new(8));
-        let handles: Vec<_> = (0..8)
-            .map(|_| {
-                let path = Arc::clone(&path);
-                let barrier = Arc::clone(&barrier);
-                thread::spawn(move || {
-                    barrier.wait();
-                    ensure(&path).unwrap()
+        for _ in 0..32 {
+            let root = tempdir().unwrap();
+            let path = Arc::new(root.path().join("mcp-token"));
+            let barrier = Arc::new(Barrier::new(17));
+            let handles: Vec<_> = (0..16)
+                .map(|_| {
+                    let path = Arc::clone(&path);
+                    let barrier = Arc::clone(&barrier);
+                    thread::spawn(move || {
+                        barrier.wait();
+                        ensure(&path).unwrap()
+                    })
                 })
-            })
-            .collect();
-        let tokens: Vec<_> = handles
-            .into_iter()
-            .map(|handle| handle.join().unwrap())
-            .collect();
-        assert!(tokens.windows(2).all(|pair| pair[0] == pair[1]));
+                .collect();
+            barrier.wait();
+            let tokens: Vec<_> = handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect();
+            assert!(tokens.windows(2).all(|pair| pair[0] == pair[1]));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_stale_cleanup_tolerates_entries_removed_after_read_dir() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        for _ in 0..32 {
+            let root = tempdir().unwrap();
+            let token = Arc::new(root.path().join("mcp-token"));
+            for _ in 0..32 {
+                let stale = root
+                    .path()
+                    .join(format!(".mcp-token.ensure-{}", Uuid::new_v4()));
+                fs::write(&stale, b"partial").unwrap();
+                fs::set_permissions(&stale, fs::Permissions::from_mode(0o600)).unwrap();
+                let stale = CString::new(stale.as_os_str().as_bytes()).unwrap();
+                let old = libc::timespec {
+                    tv_sec: chrono::Utc::now().timestamp() - 7200,
+                    tv_nsec: 0,
+                };
+                assert_eq!(
+                    unsafe {
+                        libc::utimensat(libc::AT_FDCWD, stale.as_ptr(), [old, old].as_ptr(), 0)
+                    },
+                    0
+                );
+            }
+            let barrier = Arc::new(Barrier::new(17));
+            let handles: Vec<_> = (0..16)
+                .map(|_| {
+                    let token = Arc::clone(&token);
+                    let barrier = Arc::clone(&barrier);
+                    thread::spawn(move || {
+                        barrier.wait();
+                        cleanup_stale_temps(token.parent().unwrap(), &token)
+                    })
+                })
+                .collect();
+            barrier.wait();
+            for handle in handles {
+                handle.join().unwrap().unwrap();
+            }
+        }
     }
 }

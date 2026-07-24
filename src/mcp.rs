@@ -1,11 +1,11 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::studio::{Studio, StudioError};
-use crate::{target_text_is_valid, VERSION};
+use crate::studio::Studio;
+use crate::video_editor::{self, EditorError, VideoEditorRequest};
+use crate::VERSION;
 
 fn mcp_ok(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
@@ -32,182 +32,279 @@ fn tool_result(structured: Value, text: Option<String>) -> Value {
 pub fn tool_specs() -> Value {
     json!([
         {
-            "name": "get_status",
-            "description": "Return Video Work API readiness, model, FunClip, and MCP status.",
-            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
-        },
-        {
-            "name": "list_speakers",
-            "description": "List speakers and their voice profiles.",
-            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
-        },
-        {
-            "name": "create_speaker",
-            "description": "Create a speaker entry in the local voice library.",
+            "name": "video_editor",
+            "description": "The sole Video Work API tool for speakers, consent-gated voices, speech/subtitles, virtual project editing, queued media work, gates, lifecycle, and exports.",
             "inputSchema": {
-                "type": "object",
-                "properties": { "name": { "type": "string" } },
-                "required": ["name"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "delete_speaker",
-            "description": "Delete a speaker that has no profiles.",
-            "inputSchema": {
-                "type": "object",
-                "properties": { "speaker_id": { "type": "string" } },
-                "required": ["speaker_id"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "rename_speaker",
-            "description": "Rename a speaker (1–100 characters). Fails if another speaker already uses the name.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "speaker_id": { "type": "string" },
-                    "name": { "type": "string" }
-                },
-                "required": ["speaker_id", "name"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "add_voice_profile",
-            "description": "Import reference audio from VWA_REFERENCE_INPUT_DIR. Requires confirm_rights=true and an exact transcript.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "speaker_id": { "type": "string" },
-                    "style_name": { "type": "string" },
-                    "prompt_text": { "type": "string" },
-                    "audio_path": { "type": "string" },
-                    "confirm_rights": { "type": "boolean" }
-                },
-                "required": ["speaker_id", "style_name", "prompt_text", "audio_path", "confirm_rights"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "delete_voice_profile",
-            "description": "Delete a voice profile that has no generation history.",
-            "inputSchema": {
-                "type": "object",
-                "properties": { "profile_id": { "type": "string" } },
-                "required": ["profile_id"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "rename_voice_profile",
-            "description": "Rename a voice profile style (1–100 characters). Must be unique per speaker.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "profile_id": { "type": "string" },
-                    "style_name": { "type": "string" }
-                },
-                "required": ["profile_id", "style_name"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "generate_speech",
-            "description": "Zero-shot CosyVoice3 speech using an existing profile. Returns generation id and local audio_path (not base64).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "speaker_id": { "type": "string" },
-                    "profile_id": { "type": "string" },
-                    "target_text": { "type": "string" },
-                    "speed": { "type": "number", "minimum": 0.75, "maximum": 1.25 }
-                },
-                "required": ["speaker_id", "profile_id", "target_text"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "get_generation",
-            "description": "Get generation status and audio path when complete.",
-            "inputSchema": {
-                "type": "object",
-                "properties": { "generation_id": { "type": "string" } },
-                "required": ["generation_id"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "extract_video_subtitles",
-            "description": "Extract precise time-coded subtitles from a video under VWA_VIDEO_INPUT_DIR using FunClip stage-1 ASR.",
-            "inputSchema": {
-                "type": "object",
-                "properties": { "video_path": { "type": "string" } },
-                "required": ["video_path"],
-                "additionalProperties": false
+                "oneOf": [
+                    action_schema("get_status", json!({}), &[]),
+                    action_schema("list_speakers", json!({}), &[]),
+                    action_schema(
+                        "create_speaker",
+                        json!({ "name": { "type": "string" } }),
+                        &["name"]
+                    ),
+                    action_schema(
+                        "delete_speaker",
+                        json!({ "speaker_id": { "type": "string" } }),
+                        &["speaker_id"]
+                    ),
+                    action_schema(
+                        "rename_speaker",
+                        json!({
+                            "speaker_id": { "type": "string" },
+                            "name": { "type": "string" }
+                        }),
+                        &["speaker_id", "name"]
+                    ),
+                    action_schema(
+                        "add_voice_profile",
+                        json!({
+                            "speaker_id": { "type": "string" },
+                            "style_name": { "type": "string" },
+                            "prompt_text": { "type": "string" },
+                            "audio_path": { "type": "string" },
+                            "confirm_rights": { "type": "boolean" }
+                        }),
+                        &["speaker_id", "style_name", "prompt_text", "audio_path", "confirm_rights"]
+                    ),
+                    action_schema(
+                        "delete_voice_profile",
+                        json!({ "profile_id": { "type": "string" } }),
+                        &["profile_id"]
+                    ),
+                    action_schema(
+                        "rename_voice_profile",
+                        json!({
+                            "profile_id": { "type": "string" },
+                            "style_name": { "type": "string" }
+                        }),
+                        &["profile_id", "style_name"]
+                    ),
+                    action_schema(
+                        "generate_speech",
+                        json!({
+                            "speaker_id": { "type": "string" },
+                            "profile_id": { "type": "string" },
+                            "target_text": { "type": "string" },
+                            "speed": { "type": "number", "minimum": 0.75, "maximum": 1.25 }
+                        }),
+                        &["speaker_id", "profile_id", "target_text"]
+                    ),
+                    action_schema(
+                        "get_generation",
+                        json!({ "generation_id": { "type": "string" } }),
+                        &["generation_id"]
+                    ),
+                    action_schema(
+                        "extract_video_subtitles",
+                        json!({ "video_path": { "type": "string" } }),
+                        &["video_path"]
+                    ),
+                    action_schema("list_projects", json!({}), &[]),
+                    action_schema(
+                        "create_project",
+                        json!({
+                            "slug": { "type": "string" },
+                            "content": { "type": "string" }
+                        }),
+                        &["slug"]
+                    ),
+                    action_schema(
+                        "get_tree",
+                        json!({ "project": { "type": "string" } }),
+                        &["project"]
+                    ),
+                    action_schema(
+                        "read_file",
+                        json!({
+                            "project": { "type": "string" },
+                            "path": { "type": "string" }
+                        }),
+                        &["project", "path"]
+                    ),
+                    action_schema(
+                        "write_file",
+                        json!({
+                            "project": { "type": "string" },
+                            "path": { "const": "project.vpe" },
+                            "content": { "type": "string" },
+                            "expected_revision": { "type": "integer", "minimum": 1 }
+                        }),
+                        &["project", "path", "content", "expected_revision"]
+                    ),
+                    action_schema(
+                        "validate",
+                        json!({ "project": { "type": "string" } }),
+                        &["project"]
+                    ),
+                    action_schema(
+                        "allocate_variant_ids",
+                        json!({
+                            "namespace": { "type": "string" },
+                            "count": { "type": "integer", "minimum": 1, "maximum": 10000 },
+                            "languages": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            }
+                        }),
+                        &["namespace"]
+                    ),
+                    action_schema(
+                        "export",
+                        json!({ "project": { "type": "string" } }),
+                        &["project"]
+                    ),
+                    action_schema(
+                        "get_job",
+                        json!({ "job_id": { "type": "string" } }),
+                        &["job_id"]
+                    ),
+                    action_schema(
+                        "cancel_job",
+                        json!({ "job_id": { "type": "string" } }),
+                        &["job_id"]
+                    ),
+                    action_schema(
+                        "extract_analysis_frames",
+                        json!({
+                            "request": {
+                                "type": "object",
+                                "properties": {
+                                    "video_path": { "type": "string" },
+                                    "max_frames": { "type": "integer", "minimum": 1, "maximum": 12 },
+                                    "resolution": {
+                                        "type": "array",
+                                        "prefixItems": [
+                                            { "type": "integer", "minimum": 1, "maximum": 1920 },
+                                            { "type": "integer", "minimum": 1, "maximum": 1920 }
+                                        ],
+                                        "minItems": 2,
+                                        "maxItems": 2
+                                    },
+                                    "add_timestamp_overlay": { "type": "boolean" },
+                                    "asr_segments": { "type": "array", "items": { "type": "object" } }
+                                },
+                                "required": ["video_path"],
+                                "additionalProperties": false
+                            }
+                        }),
+                        &["request"]
+                    ),
+                    action_schema(
+                        "analyze_safe_trims",
+                        json!({
+                            "request": {
+                                "type": "object",
+                                "properties": {
+                                    "requested_start": { "type": "number", "minimum": 0 },
+                                    "requested_end": { "type": "number", "exclusiveMinimum": 0 },
+                                    "search_radius": { "type": "number", "minimum": 0 },
+                                    "words": { "type": "array", "items": { "type": "object" } },
+                                    "video_path": { "type": "string" }
+                                },
+                                "required": ["video_path", "requested_start", "requested_end"],
+                                "additionalProperties": false
+                            }
+                        }),
+                        &["request"]
+                    ),
+                    action_schema(
+                        "validate_phase",
+                        json!({
+                            "project": { "type": "string" },
+                            "request": {
+                                "type": "object",
+                                "properties": {
+                                    "phase": { "enum": ["pre-render", "pre-package", "acceptance"] },
+                                    "input_manifest": { "type": "object", "additionalProperties": { "type": "string" } },
+                                    "subtitle_overflow": { "type": "object" },
+                                    "deliverable_stem": { "type": "string" },
+                                    "master_output": { "type": "string" },
+                                    "variant_outputs": { "type": "object", "additionalProperties": { "type": "string" } },
+                                    "cover_jobs": { "type": "object", "additionalProperties": { "type": "string" } },
+                                    "copy_consistency": { "type": "object" },
+                                    "job_id": { "type": "string" },
+                                },
+                                "required": ["phase"],
+                                "additionalProperties": false
+                            }
+                        }),
+                        &["project", "request"]
+                    ),
+                    action_schema(
+                        "render_cover",
+                        json!({
+                            "project": { "type": "string" },
+                            "variant_key": { "type": "string" },
+                            "spec": {
+                                "type": "object",
+                                "properties": {
+                                    "source_video": { "type": "string" },
+                                    "frame_timestamp": { "type": "number", "minimum": 0 },
+                                    "layout_profile": {
+                                        "enum": ["smoke-glass", "banner-card", "diagonal", "editorial-black-gold"]
+                                    },
+                                    "title": { "type": "string" },
+                                    "subtitle": { "type": "string" }
+                                },
+                                "required": ["source_video", "frame_timestamp", "layout_profile", "title"],
+                                "additionalProperties": false
+                            }
+                        }),
+                        &["project", "variant_key", "spec"]
+                    ),
+                    action_schema(
+                        "cleanup_intermediates",
+                        json!({
+                            "project": { "type": "string" },
+                            "request": {
+                                "type": "object",
+                                "properties": {
+                                    "paths": { "type": "array", "items": { "type": "string" } },
+                                    "dry_run": { "type": "boolean", "default": true }
+                                },
+                                "additionalProperties": false
+                            }
+                        }),
+                        &["project", "request"]
+                    ),
+                    action_schema(
+                        "archive_completed_sources",
+                        json!({
+                            "project": { "type": "string" },
+                            "request": {
+                                "type": "object",
+                                "properties": {
+                                    "deliverable_stem": { "type": "string" },
+                                    "dry_run": { "type": "boolean", "default": true }
+                                },
+                                "required": ["deliverable_stem"],
+                                "additionalProperties": false
+                            }
+                        }),
+                        &["project", "request"]
+                    )
+                ]
             }
         }
     ])
 }
 
-#[derive(Debug, Deserialize)]
-struct CreateSpeakerArgs {
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct DeleteSpeakerArgs {
-    speaker_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct RenameSpeakerArgs {
-    speaker_id: String,
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProfileArgs {
-    speaker_id: String,
-    style_name: String,
-    prompt_text: String,
-    audio_path: String,
-    confirm_rights: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct DeleteProfileArgs {
-    profile_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct RenameProfileArgs {
-    profile_id: String,
-    style_name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct GenerationArgs {
-    speaker_id: String,
-    profile_id: String,
-    target_text: String,
-    #[serde(default = "default_speed")]
-    speed: f64,
-}
-
-fn default_speed() -> f64 {
-    1.0
-}
-
-#[derive(Debug, Deserialize)]
-struct GenerationIdArgs {
-    generation_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SubtitleArgs {
-    video_path: String,
+fn action_schema(action: &str, properties: Value, required: &[&str]) -> Value {
+    let mut fields = properties.as_object().cloned().unwrap_or_default();
+    fields.insert("action".into(), json!({ "const": action }));
+    let mut required_fields = vec![Value::String("action".into())];
+    required_fields.extend(
+        required
+            .iter()
+            .map(|field| Value::String((*field).to_string())),
+    );
+    json!({
+        "type": "object",
+        "properties": fields,
+        "required": required_fields,
+        "additionalProperties": false
+    })
 }
 
 pub enum McpResponse {
@@ -291,133 +388,75 @@ enum McpToolError {
 }
 
 fn call_tool(studio: &Studio, name: &str, arguments: Value) -> Result<Value, McpToolError> {
-    match name {
-        "get_status" => {
-            let payload = studio
-                .status_payload(true)
-                .map_err(|e| McpToolError::Failed(e.to_string()))?;
-            Ok(tool_result(payload, None))
-        }
-        "list_speakers" => {
-            let payload = studio
-                .list_speakers()
-                .map_err(|e| McpToolError::Failed(e.to_string()))?;
-            Ok(tool_result(payload, None))
-        }
-        "create_speaker" => {
-            let args: CreateSpeakerArgs = serde_json::from_value(arguments)
-                .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
-            let payload = studio.create_speaker(&args.name).map_err(map_studio_err)?;
-            Ok(tool_result(payload, None))
-        }
-        "delete_speaker" => {
-            let args: DeleteSpeakerArgs = serde_json::from_value(arguments)
-                .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
-            studio
-                .delete_speaker(&args.speaker_id)
-                .map_err(map_studio_err)?;
-            Ok(tool_result(
-                json!({ "deleted": true, "speaker_id": args.speaker_id }),
-                None,
-            ))
-        }
-        "rename_speaker" => {
-            let args: RenameSpeakerArgs = serde_json::from_value(arguments)
-                .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
-            let payload = studio
-                .rename_speaker(&args.speaker_id, &args.name)
-                .map_err(map_studio_err)?;
-            Ok(tool_result(payload, None))
-        }
-        "add_voice_profile" => {
-            let args: ProfileArgs = serde_json::from_value(arguments)
-                .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
-            let payload = studio
-                .add_profile_from_sandbox(
-                    &args.speaker_id,
-                    &args.style_name,
-                    &args.prompt_text,
-                    &args.audio_path,
-                    args.confirm_rights,
-                )
-                .map_err(map_studio_err)?;
-            Ok(tool_result(payload, None))
-        }
-        "delete_voice_profile" => {
-            let args: DeleteProfileArgs = serde_json::from_value(arguments)
-                .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
-            studio
-                .delete_profile(&args.profile_id)
-                .map_err(map_studio_err)?;
-            Ok(tool_result(
-                json!({ "deleted": true, "profile_id": args.profile_id }),
-                None,
-            ))
-        }
-        "rename_voice_profile" => {
-            let args: RenameProfileArgs = serde_json::from_value(arguments)
-                .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
-            let payload = studio
-                .rename_profile(&args.profile_id, &args.style_name)
-                .map_err(map_studio_err)?;
-            Ok(tool_result(payload, None))
-        }
-        "generate_speech" => {
-            let args: GenerationArgs = serde_json::from_value(arguments)
-                .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
-            let text = args.target_text.trim();
-            if !target_text_is_valid(text) {
-                return Err(McpToolError::InvalidArgs(
-                    "Text must contain 1 to 1200 characters".into(),
-                ));
-            }
-            if !(0.75..=1.25).contains(&args.speed) || !args.speed.is_finite() {
-                return Err(McpToolError::InvalidArgs(
-                    "Speed must be between 0.75 and 1.25".into(),
-                ));
-            }
-            let payload = studio
-                .generate_speech(&args.speaker_id, &args.profile_id, text, args.speed)
-                .map_err(map_studio_err)?;
-            Ok(tool_result(payload, None))
-        }
-        "get_generation" => {
-            let args: GenerationIdArgs = serde_json::from_value(arguments)
-                .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
-            let payload = studio
-                .get_generation(&args.generation_id)
-                .map_err(map_studio_err)?;
-            Ok(tool_result(payload, None))
-        }
-        "extract_video_subtitles" => {
-            let args: SubtitleArgs = serde_json::from_value(arguments)
-                .map_err(|e| McpToolError::InvalidArgs(e.to_string()))?;
-            let payload = studio
-                .extract_subtitles(&args.video_path)
-                .map_err(map_studio_err)?;
-            let srt = payload
-                .get("srt")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            Ok(tool_result(payload, Some(srt)))
-        }
-        _ => Err(McpToolError::Unknown),
+    if name != "video_editor" {
+        return Err(McpToolError::Unknown);
+    }
+    let request: VideoEditorRequest = serde_json::from_value(arguments)
+        .map_err(|error| McpToolError::InvalidArgs(error.to_string()))?;
+    let payload = video_editor::execute(studio, request).map_err(map_editor_error)?;
+    Ok(tool_result(payload, None))
+}
+
+fn map_editor_error(error: EditorError) -> McpToolError {
+    match error {
+        EditorError::Invalid(message) => McpToolError::InvalidArgs(message),
+        EditorError::NotFound(message) => McpToolError::NotFound(message),
+        EditorError::Conflict(message) => McpToolError::Conflict(message),
+        EditorError::Internal(error) => McpToolError::Failed(error.to_string()),
     }
 }
 
-fn map_studio_err(err: anyhow::Error) -> McpToolError {
-    if let Some(se) = err.downcast_ref::<StudioError>() {
-        return match se {
-            StudioError::SpeakerNotFound
-            | StudioError::ProfileNotFound
-            | StudioError::GenerationNotFound => McpToolError::NotFound(se.to_string()),
-            StudioError::SpeakerHasProfiles
-            | StudioError::NameConflict
-            | StudioError::ProfileInUse
-            | StudioError::ProfileFileInvalid => McpToolError::Conflict(se.to_string()),
-            other => McpToolError::Failed(other.to_string()),
-        };
+#[cfg(test)]
+mod tests {
+    use super::tool_specs;
+
+    #[test]
+    fn only_video_editor_is_exposed() {
+        let specs = tool_specs();
+        let names: Vec<_> = specs
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert_eq!(names, vec!["video_editor"]);
+        let actions = specs[0]["inputSchema"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|schema| schema["properties"]["action"]["const"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actions,
+            [
+                "get_status",
+                "list_speakers",
+                "create_speaker",
+                "delete_speaker",
+                "rename_speaker",
+                "add_voice_profile",
+                "delete_voice_profile",
+                "rename_voice_profile",
+                "generate_speech",
+                "get_generation",
+                "extract_video_subtitles",
+                "list_projects",
+                "create_project",
+                "get_tree",
+                "read_file",
+                "write_file",
+                "validate",
+                "allocate_variant_ids",
+                "export",
+                "get_job",
+                "cancel_job",
+                "extract_analysis_frames",
+                "analyze_safe_trims",
+                "validate_phase",
+                "render_cover",
+                "cleanup_intermediates",
+                "archive_completed_sources",
+            ]
+        );
     }
-    McpToolError::Failed(err.to_string())
 }

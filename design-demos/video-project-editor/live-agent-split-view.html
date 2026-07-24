@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Video Project Editor — Live Agent Split View</title>
+<!--
+Direction C: Live Agent Split View
+Assumptions:
+- The operator wants the agent's text mutation and its parsed video meaning visible at once.
+- project.vpe is the sole writable truth; the semantic timeline is an inspection surface.
+- High information density is intentional, but all panels use real project information.
+-->
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#11110f;--panel:#181816;--panel2:#20201d;--line:#34332d;
+  --text:#eeeadd;--muted:#a7a397;--dim:#6f6d65;--lime:#b9df72;
+  --amber:#efad54;--cyan:#74c8c1;--red:#e17c69;--violet:#b5a2d8;
+  --mono:"SFMono-Regular","Cascadia Code","Liberation Mono",monospace;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box} html,body{width:100%;height:100%;margin:0;overflow:hidden}
+body{background:var(--bg);color:var(--text);font:13px/1.45 var(--sans)}
+button{font:inherit;color:inherit}.app{height:100vh;display:grid;grid-template-rows:46px 1fr 25px}
+.topbar{display:flex;align-items:center;border-bottom:1px solid var(--line);background:#141412}
+.brand{height:100%;display:flex;align-items:center;gap:11px;padding:0 16px;border-right:1px solid var(--line);min-width:234px}
+.mark{width:22px;height:22px;display:grid;place-items:center;background:var(--lime);color:#111;font:800 11px var(--mono)}
+.brand strong{letter-spacing:.01em}.workspace{display:flex;align-items:center;gap:8px;padding:0 14px;color:var(--muted)}
+.workspace b{color:var(--text);font-weight:600}.top-spacer{flex:1}
+.presence{display:flex;align-items:center;gap:8px;padding:0 14px;color:var(--muted)}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--lime);box-shadow:0 0 0 4px #b9df7218}
+.validate,.export{height:29px;border:1px solid var(--line);background:var(--panel2);padding:0 12px;margin-right:8px}
+.export{background:var(--lime);border-color:var(--lime);color:#111;font-weight:750}
+.shell{min-height:0;display:grid;grid-template-columns:234px minmax(440px,1fr) minmax(400px,.92fr) 278px}
+.projects,.source,.semantic,.operations{min-width:0;min-height:0;border-right:1px solid var(--line);background:var(--panel)}
+.section-title{height:36px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid var(--line);color:var(--muted);font:600 10px var(--mono);letter-spacing:.12em;text-transform:uppercase}
+.section-title button{border:0;background:none;color:var(--muted);padding:3px 6px}
+.project-list{padding:7px}.project{border:1px solid transparent;margin-bottom:5px}
+.project-head{width:100%;display:grid;grid-template-columns:18px 1fr auto;align-items:center;gap:4px;padding:8px;border:0;background:none;text-align:left}
+.project.active{border-color:#49483f;background:#22221e}.project.active .project-head{color:#fff}
+.chev{color:var(--dim);font:11px var(--mono)}.project-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.project-state{width:7px;height:7px;border-radius:50%;background:var(--cyan)}.project-state.warn{background:var(--amber)}.project-state.run{background:var(--lime)}
+.tree{padding:0 8px 8px 26px;color:var(--muted);font:12px/1.85 var(--mono)}
+.tree-row{display:flex;align-items:center;gap:7px;white-space:nowrap}.tree-row.active{color:var(--text);background:#303029;margin-left:-8px;padding-left:8px}
+.tree-row.generated{color:var(--dim)}.file-icon{width:12px;color:var(--amber)}
+.source{display:grid;grid-template-rows:36px 32px 32px 1fr 31px}
+.tabs{display:flex;align-items:stretch;border-bottom:1px solid var(--line);background:#151513;overflow:hidden}
+.tab{display:flex;align-items:center;gap:8px;min-width:150px;padding:0 11px;border:0;border-right:1px solid var(--line);background:#1b1b18;color:var(--muted);font:12px var(--mono)}
+.tab.active{background:var(--panel);color:var(--text);box-shadow:inset 0 2px var(--amber)}
+.dirty{color:var(--amber)}.breadcrumbs{display:flex;align-items:center;gap:7px;padding:0 12px;border-bottom:1px solid var(--line);color:var(--dim);font:11px var(--mono)}
+.breadcrumbs b{color:var(--muted);font-weight:400}.editor{min-height:0;overflow:auto;padding:9px 0 25px;background:linear-gradient(90deg,#151513 0 47px,var(--panel) 47px)}
+.code-line{display:grid;grid-template-columns:47px 1fr;min-height:21px;font:12px/21px var(--mono);white-space:pre}
+.ln{padding-right:12px;text-align:right;color:#5f5e57;user-select:none}.code{padding-left:14px;border-left:1px solid #272722}
+.code-line.changed .ln{box-shadow:inset 3px 0 var(--amber)}.code-line.focused{background:#24241f}
+.kw{color:var(--violet)}.str{color:#d9c58c}.num{color:var(--cyan)}.op{color:var(--amber)}.comment{color:#6f7764;font-style:italic}
+.agent-caret{display:inline-block;width:2px;height:15px;margin:0 1px -3px;background:var(--lime);box-shadow:0 0 8px #b9df7288}
+.agent-note{margin-left:9px;padding:2px 6px;background:var(--lime);color:#111;font:700 9px var(--sans);border-radius:2px}
+.edit-status{display:flex;align-items:center;gap:13px;padding:0 10px;border-top:1px solid var(--line);color:var(--muted);font:10px var(--mono)}
+.edit-status .ok{color:var(--lime)}.semantic{display:grid;grid-template-rows:36px 1fr}
+.semantic-scroll{min-height:0;overflow:auto;padding:12px}.document-card{border:1px solid var(--line);background:#151513;margin-bottom:10px}
+.card-head{display:flex;align-items:center;justify-content:space-between;padding:9px 10px;border-bottom:1px solid var(--line)}
+.card-head strong{font-size:12px}.chip{padding:2px 6px;border:1px solid #486138;color:var(--lime);font:9px var(--mono);text-transform:uppercase}
+.summary-grid{display:grid;grid-template-columns:repeat(3,1fr)}.metric{padding:9px 10px;border-right:1px solid var(--line)}
+.metric:last-child{border:0}.metric span{display:block;color:var(--dim);font:9px var(--mono);text-transform:uppercase}.metric b{font:500 12px var(--mono)}
+.timeline{padding:11px}.ruler{display:grid;grid-template-columns:repeat(5,1fr);margin-left:49px;color:var(--dim);font:9px var(--mono)}
+.track{display:grid;grid-template-columns:44px 1fr;gap:5px;align-items:center;margin-top:7px}.track-name{color:var(--muted);font:9px var(--mono);text-transform:uppercase}
+.lane{height:31px;position:relative;background:#22221e;border:1px solid #2e2e29}
+.clip{position:absolute;top:3px;height:23px;padding:4px 6px;overflow:hidden;white-space:nowrap;border-left:2px solid;font:9px var(--mono)}
+.clip.host{left:0;width:52%;background:#30433f;border-color:var(--cyan)}.clip.detail{left:49%;width:38%;background:#4a3b2a;border-color:var(--amber)}
+.clip.hold{left:19%;width:12%;background:#3e3650;border-color:var(--violet)}.marker{position:absolute;top:-5px;bottom:-4px;left:23%;width:1px;background:var(--red)}.marker:before{content:"HOOK";position:absolute;top:-12px;left:3px;color:var(--red);font:8px var(--mono)}
+.node-list{padding:5px 10px 10px}.node{display:grid;grid-template-columns:82px 1fr auto;gap:8px;padding:6px 0;border-bottom:1px solid #292924;font:10px var(--mono)}
+.node:last-child{border:0}.node-kind{color:var(--dim)}.node time{color:var(--muted)}.node .valid{color:var(--lime)}
+.operations{border-right:0;display:grid;grid-template-rows:36px auto 1fr}.run-card{margin:10px;border:1px solid #4d5639;background:#1d2118}
+.run-head{display:flex;justify-content:space-between;padding:9px 10px;border-bottom:1px solid #3a432d}.run-head b{font-size:11px}.run-head span{color:var(--lime);font:9px var(--mono)}
+.run-body{padding:10px}.run-body p{margin:0 0 9px;color:var(--muted);font-size:11px}.progress{height:4px;background:#34352e}.progress i{display:block;width:62%;height:100%;background:var(--lime)}
+.run-meta{display:flex;justify-content:space-between;margin-top:7px;color:var(--dim);font:9px var(--mono)}
+.queue-list{min-height:0;overflow:auto;padding:0 10px 14px}.queue-label{margin:7px 0;color:var(--dim);font:9px var(--mono);letter-spacing:.1em}
+.job{padding:9px 0;border-top:1px solid var(--line)}.job-row{display:flex;justify-content:space-between;gap:8px;font:11px var(--mono)}
+.job-row span{color:var(--muted)}.job p{margin:4px 0 0;color:var(--dim);font-size:10px}
+.agent-log{margin-top:12px;border:1px solid var(--line);background:#141412}.agent-log .log-title{padding:7px 8px;border-bottom:1px solid var(--line);font:9px var(--mono);color:var(--lime)}
+.agent-log p{padding:0 8px;color:var(--muted);font:10px/1.45 var(--mono)}.agent-log b{color:var(--text);font-weight:500}
+.statusbar{display:flex;align-items:center;gap:15px;padding:0 9px;background:#272820;border-top:1px solid #3e4232;color:#b8b5aa;font:10px var(--mono)}
+.statusbar .live{align-self:stretch;display:flex;align-items:center;margin-left:-9px;padding:0 10px;background:var(--lime);color:#111;font-weight:800}
+.statusbar .spacer{flex:1}.hide{display:none}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="mark">VP</span><strong>Video Project Editor</strong></div>
+    <div class="workspace"><span>Workspace</span><b>Campaign Studio</b><span>›</span><b>aurora-launch</b></div>
+    <div class="top-spacer"></div>
+    <div class="presence"><span class="pulse"></span><span>Agent editing live</span></div>
+    <button class="validate" id="validateButton">Validate</button>
+    <button class="export">Export Revision 18</button>
+  </header>
+
+  <main class="shell">
+    <aside class="projects">
+      <div class="section-title"><span>Projects</span><button>＋</button></div>
+      <div class="project-list">
+        <section class="project active">
+          <button class="project-head"><span class="chev">⌄</span><span class="project-name">aurora-launch</span><i class="project-state run"></i></button>
+          <div class="tree">
+            <div class="tree-row active"><span class="file-icon">V</span>project.vpe <span class="dirty">●</span></div>
+            <div class="tree-row"><span class="file-icon">›</span>assets <small>2</small></div>
+            <div class="tree-row"><span class="file-icon">›</span>variants <small>2</small></div>
+            <div class="tree-row generated"><span class="file-icon">›</span>receipts <small>17</small></div>
+            <div class="tree-row generated"><span class="file-icon">›</span>exports <small>6</small></div>
+            <div class="tree-row generated"><span class="file-icon">›</span>.history</div>
+          </div>
+        </section>
+        <section class="project">
+          <button class="project-head"><span class="chev">›</span><span class="project-name">founder-story</span><i class="project-state"></i></button>
+        </section>
+        <section class="project">
+          <button class="project-head"><span class="chev">›</span><span class="project-name">product-loop</span><i class="project-state warn"></i></button>
+        </section>
+      </div>
+    </aside>
+
+    <section class="source">
+      <div class="section-title"><span>Source of truth</span><button>Revision 18</button></div>
+      <nav class="tabs"><button class="tab active"><span class="file-icon">V</span>project.vpe <span class="dirty">●</span></button><button class="tab">audit_receipt.json</button></nav>
+      <div class="breadcrumbs"><span>Campaign Studio</span><span>›</span><span>aurora-launch</span><span>›</span><b>project.vpe</b></div>
+      <div class="editor" aria-label="project.vpe editor">
+        <div class="code-line"><span class="ln">1</span><span class="code"><span class="kw">project</span> <span class="str">"Aurora Launch"</span> {</span></div>
+        <div class="code-line"><span class="ln">2</span><span class="code">  <span class="kw">canvas</span> <span class="num">1080x1920</span> @ <span class="num">30fps</span></span></div>
+        <div class="code-line"><span class="ln">3</span><span class="code">  <span class="kw">source</span> host = <span class="str">"assets/host-take-03.mp4"</span></span></div>
+        <div class="code-line"><span class="ln">4</span><span class="code">  <span class="kw">source</span> detail = <span class="str">"assets/product-detail.mp4"</span></span></div>
+        <div class="code-line"><span class="ln">5</span><span class="code"></span></div>
+        <div class="code-line"><span class="ln">6</span><span class="code">  <span class="kw">timeline</span> {</span></div>
+        <div class="code-line"><span class="ln">7</span><span class="code">    <span class="kw">track</span> main {</span></div>
+        <div class="code-line"><span class="ln">8</span><span class="code">      <span class="op">clip</span> host <span class="kw">source</span> <span class="num">00:00:00.600..00:00:06.800</span></span></div>
+        <div class="code-line"><span class="ln">9</span><span class="code">        <span class="kw">at</span> <span class="num">00:00:00.000</span></span></div>
+        <div class="code-line"><span class="ln">10</span><span class="code">      <span class="op">cut</span> <span class="kw">at</span> <span class="num">00:00:03.120</span></span></div>
+        <div class="code-line"><span class="ln">11</span><span class="code">      <span class="op">clip</span> detail <span class="kw">source</span> <span class="num">00:00:01.400..00:00:05.900</span></span></div>
+        <div class="code-line"><span class="ln">12</span><span class="code">        <span class="kw">at</span> <span class="num">00:00:06.200</span></span></div>
+        <div class="code-line"><span class="ln">13</span><span class="code">      <span class="op">transition</span> cross_dissolve <span class="kw">at</span> <span class="num">00:00:06.200</span></span></div>
+        <div class="code-line"><span class="ln">14</span><span class="code">        <span class="kw">duration</span> <span class="num">12f</span></span></div>
+        <div class="code-line"><span class="ln">15</span><span class="code">    }</span></div>
+        <div class="code-line changed"><span class="ln">16</span><span class="code">    <span class="kw">track</span> overlay {</span></div>
+        <div class="code-line changed focused"><span class="ln">17</span><span class="code">      <span class="op">hold</span> host <span class="kw">at</span> <span class="num">00:00:02.500..00:00:03.200</span><span class="agent-caret"></span><span class="agent-note">AGENT</span></span></div>
+        <div class="code-line changed"><span class="ln">18</span><span class="code">        <span class="kw">source_time</span> <span class="num">00:00:02.800</span></span></div>
+        <div class="code-line changed"><span class="ln">19</span><span class="code">    }</span></div>
+        <div class="code-line"><span class="ln">20</span><span class="code">  }</span></div>
+        <div class="code-line"><span class="ln">21</span><span class="code"></span></div>
+        <div class="code-line"><span class="ln">22</span><span class="code">  <span class="op">marker</span> <span class="str">"Opening hook"</span> <span class="kw">at</span> <span class="num">00:00:03.000</span></span></div>
+        <div class="code-line"><span class="ln">23</span><span class="code">  <span class="op">variant</span> <span class="str">"ZH-EN"</span> <span class="kw">aspect</span> <span class="num">9:16</span></span></div>
+        <div class="code-line"><span class="ln">24</span><span class="code">    <span class="kw">subtitles</span> <span class="str">"subs.zh-en.ass"</span></span></div>
+        <div class="code-line"><span class="ln">25</span><span class="code">  <span class="op">gate</span> pre_render <span class="kw">require</span> opening_hook,</span></div>
+        <div class="code-line"><span class="ln">26</span><span class="code">    continuous_timeline</span></div>
+        <div class="code-line"><span class="ln">27</span><span class="code">}</span></div>
+      </div>
+      <div class="edit-status"><span class="ok">✓ Parsed in 18 ms</span><span>0 errors</span><span>Revision 18 not saved</span><span>UTF-8</span></div>
+    </section>
+
+    <section class="semantic">
+      <div class="section-title"><span>Parsed project</span><button id="viewToggle">Timeline</button></div>
+      <div class="semantic-scroll">
+        <article class="document-card">
+          <div class="card-head"><strong>Aurora Launch</strong><span class="chip">Valid</span></div>
+          <div class="summary-grid">
+            <div class="metric"><span>Canvas</span><b>1080 × 1920</b></div>
+            <div class="metric"><span>Rate</span><b>30 fps</b></div>
+            <div class="metric"><span>Duration</span><b>10.700 s</b></div>
+          </div>
+        </article>
+        <article class="document-card">
+          <div class="card-head"><strong>Deterministic timeline</strong><span class="chip">2 tracks</span></div>
+          <div class="timeline">
+            <div class="ruler"><span>00:00</span><span>00:02</span><span>00:04</span><span>00:06</span><span>00:08</span></div>
+            <div class="track"><span class="track-name">Main</span><div class="lane"><i class="marker"></i><div class="clip host">host · 6.2s</div><div class="clip detail">detail · 4.5s</div></div></div>
+            <div class="track"><span class="track-name">Overlay</span><div class="lane"><div class="clip hold">hold</div></div></div>
+          </div>
+        </article>
+        <article class="document-card">
+          <div class="card-head"><strong>Document outline</strong><span class="chip">Live</span></div>
+          <div class="node-list">
+            <div class="node"><span class="node-kind">SOURCE</span><span>host</span><span class="valid">✓</span></div>
+            <div class="node"><span class="node-kind">SOURCE</span><span>detail</span><span class="valid">✓</span></div>
+            <div class="node"><span class="node-kind">CUT</span><time>00:00:03.120</time><span class="valid">✓</span></div>
+            <div class="node"><span class="node-kind">TRANSITION</span><span>cross_dissolve · 12f</span><span class="valid">✓</span></div>
+            <div class="node"><span class="node-kind">HOLD</span><span>host · 700ms</span><span class="valid">✓</span></div>
+            <div class="node"><span class="node-kind">MARKER</span><span>Opening hook</span><span class="valid">✓</span></div>
+            <div class="node"><span class="node-kind">VARIANT</span><span>ZH-EN · 9:16</span><span class="valid">✓</span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <aside class="operations">
+      <div class="section-title"><span>Queue</span><button>1 running</button></div>
+      <article class="run-card">
+        <div class="run-head"><b>export · Revision 17</b><span>RUNNING</span></div>
+        <div class="run-body"><p>Aurora Launch · ZH-EN · 9:16</p><div class="progress"><i></i></div><div class="run-meta"><span>62%</span><span>01:18 elapsed</span></div></div>
+      </article>
+      <div class="queue-list">
+        <div class="queue-label">NEXT</div>
+        <div class="job"><div class="job-row"><b>pre-package</b><span>queued</span></div><p>founder-story · Revision 9</p></div>
+        <div class="job"><div class="job-row"><b>frame-sample</b><span>queued</span></div><p>product-loop · 12 frames</p></div>
+        <div class="queue-label">RECENT</div>
+        <div class="job"><div class="job-row"><b>pre-render</b><span style="color:var(--lime)">passed</span></div><p>Receipt 9d71…a42f</p></div>
+        <div class="agent-log">
+          <div class="log-title">AGENT SESSION · CONNECTED</div>
+          <p><b>09:42:18</b> Read project.vpe</p>
+          <p><b>09:42:21</b> Added overlay hold</p>
+          <p><b>09:42:21</b> Waiting to save Revision 18</p>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="statusbar">
+    <span class="live">LIVE</span><span>main*</span><span>Revision 18</span><span>Ln 17, Col 74</span>
+    <span class="spacer"></span><span>VPE Parser 1.0</span><span>30 fps</span><span>UTF-8</span><span>Agent: connected</span>
+  </footer>
+</div>
+<script>
+document.querySelectorAll(".project-head").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".project").forEach((project) => project.classList.remove("active"));
+    button.closest(".project").classList.add("active");
+  });
+});
+document.querySelectorAll(".tab").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((tab) => tab.classList.remove("active"));
+    button.classList.add("active");
+  });
+});
+document.getElementById("validateButton").addEventListener("click", (event) => {
+  event.currentTarget.textContent = "✓ Valid";
+  event.currentTarget.style.color = "var(--lime)";
+});
+</script>
+</body>
+</html>

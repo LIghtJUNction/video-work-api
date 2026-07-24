@@ -19,6 +19,7 @@
       </span>
     </a>
     <div class="header-actions">
+      <a class="button secondary compact" href="/editor">Video Editor</a>
       <button id="themeToggle" class="secondary compact" type="button" aria-label="切换亮色 / 深色模式">
         <svg class="icon-moon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M13.4 9.6 A5.8 5.8 0 1 1 6.4 2.6 A4.5 4.5 0 0 0 13.4 9.6 Z"/></svg>
         <svg class="icon-sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1.2v1.8M8 13v1.8M1.2 8h1.8M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3"/></g></svg>
@@ -48,6 +49,7 @@
       <ul>
         <li><a href="#auth" data-i18n="secAuth">认证与源站</a></li>
         <li><a href="#rest" data-i18n="secRest">REST 端点</a></li>
+        <li><a href="#editor" data-i18n="secEditor">Video Project Editor</a></li>
         <li><a href="#mcp" data-i18n="secMcp">HTTP MCP</a></li>
         <li><a href="#examples" data-i18n="secExamples">示例</a></li>
       </ul>
@@ -171,11 +173,37 @@
           <span data-i18n="authSession">会话</span>
           <span data-i18n="descSubtitlesUpload">multipart 字段 video（≤2 GB，常见视频格式）；提取后删除临时文件，返回 {segments, srt}。</span>
         </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/editor</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descEditorAction">与 video_editor MCP 工具相同的 action 对象；写入仍受同源与 revision CAS 保护。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method get">GET</code></span>
+          <span><code>/api/editor/events</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descEditorEvents">同源、Cookie 认证 SSE：工程 revision、校验状态与脱敏队列任务事件；禁止 query/Bearer token。</span>
+        </div>
       </div>
     </section>
 
-    <section id="mcp" class="card docs-section">
+    <section id="editor" class="card docs-section">
       <p class="eyebrow">03</p>
+      <h2 data-i18n="secEditor">Video Project Editor</h2>
+      <p data-i18n="editorIntro">
+        访问 /editor 使用纯文本方式浏览多个虚拟视频工程。project.vpe 是唯一可写文件；
+        assets、.history、receipts 与 exports 可查看但只读。
+      </p>
+      <ol class="docs-list">
+        <li data-i18n="editorStep1">创建或选择工程，打开 project.vpe；所有字段与 VPE 关键字均使用英文。</li>
+        <li data-i18n="editorStep2">保存时携带 expected_revision，冲突不会覆盖本地脏缓冲区；SSE 会提示新的远端 revision。</li>
+        <li data-i18n="editorStep3">先 Validate 当前已保存 revision，再 Export；队列状态通过脱敏 SSE 更新，断线时回退到 get_job 轮询。</li>
+      </ol>
+    </section>
+
+    <section id="mcp" class="card docs-section">
+      <p class="eyebrow">04</p>
       <h2 data-i18n="secMcp">HTTP MCP</h2>
       <p data-i18n="mcpIntro">
         端点 <code>POST /mcp</code>。JSON-RPC 2.0 方法：
@@ -192,59 +220,9 @@
           <span data-i18n="colDesc">说明</span>
         </div>
         <div class="endpoint-row" role="row">
-          <span><code>get_status</code></span>
-          <span>—</span>
-          <span data-i18n="toolStatus">服务 / 模型 / FunClip 状态</span>
-        </div>
-        <div class="endpoint-row" role="row">
-          <span><code>list_speakers</code></span>
-          <span>—</span>
-          <span data-i18n="toolList">说话人与 profiles</span>
-        </div>
-        <div class="endpoint-row" role="row">
-          <span><code>create_speaker</code></span>
-          <span><code>{name}</code></span>
-          <span data-i18n="toolCreate">创建说话人</span>
-        </div>
-        <div class="endpoint-row" role="row">
-          <span><code>delete_speaker</code></span>
-          <span><code>{speaker_id}</code></span>
-          <span data-i18n="toolDelSpeaker">删除说话人</span>
-        </div>
-        <div class="endpoint-row" role="row">
-          <span><code>rename_speaker</code></span>
-          <span><code>{speaker_id, name}</code></span>
-          <span data-i18n="toolRenameSpeaker">重命名说话人</span>
-        </div>
-        <div class="endpoint-row" role="row">
-          <span><code>add_voice_profile</code></span>
-          <span><code>{speaker_id, style_name, prompt_text, audio_path, confirm_rights}</code></span>
-          <span data-i18n="toolAddProfile">audio_path 须在 VWA_REFERENCE_INPUT_DIR 下；confirm_rights 必须为 true</span>
-        </div>
-        <div class="endpoint-row" role="row">
-          <span><code>delete_voice_profile</code></span>
-          <span><code>{profile_id}</code></span>
-          <span data-i18n="toolDelProfile">删除 profile</span>
-        </div>
-        <div class="endpoint-row" role="row">
-          <span><code>rename_voice_profile</code></span>
-          <span><code>{profile_id, style_name}</code></span>
-          <span data-i18n="toolRenameProfile">重命名语气 / style</span>
-        </div>
-        <div class="endpoint-row" role="row">
-          <span><code>generate_speech</code></span>
-          <span><code>{speaker_id, profile_id, target_text, speed?}</code></span>
-          <span data-i18n="toolGen">返回本地 audio_path</span>
-        </div>
-        <div class="endpoint-row" role="row">
-          <span><code>get_generation</code></span>
-          <span><code>{generation_id}</code></span>
-          <span data-i18n="toolGetGen">查询生成任务</span>
-        </div>
-        <div class="endpoint-row" role="row">
-          <span><code>extract_video_subtitles</code></span>
-          <span><code>{video_path}</code></span>
-          <span data-i18n="toolSubs">路径须在 VWA_VIDEO_INPUT_DIR 下</span>
+          <span><code>video_editor</code></span>
+          <span><code>{action, …}</code></span>
+          <span data-i18n="toolEditor">唯一 MCP 工具。action 覆盖状态、声音、字幕、工程树/文件、revision 写入、Validate、Export、任务查询/取消、质量门禁与生命周期。</span>
         </div>
       </div>
       <p class="docs-note" data-i18n="mcpNote">
@@ -253,7 +231,7 @@
     </section>
 
     <section id="examples" class="card docs-section">
-      <p class="eyebrow">04</p>
+      <p class="eyebrow">05</p>
       <h2 data-i18n="secExamples">示例</h2>
 
       <h3 data-i18n="exStatus">状态</h3>
@@ -293,6 +271,7 @@
         toc: "目录",
         secAuth: "认证与源站",
         secRest: "REST 端点",
+        secEditor: "Video Project Editor",
         secMcp: "HTTP MCP",
         secExamples: "示例",
         auth1: "浏览器会话使用 HttpOnly、SameSite=Strict Cookie vwa_session，勿记录明文。",
@@ -325,6 +304,12 @@
         descSubtitles: "JSON {video_path} 相对于 VWA_VIDEO_INPUT_DIR；返回 {segments, srt}。",
         descSubtitlesUpload:
           "multipart 字段 video（≤2 GB，常见视频格式）；提取后删除临时文件，返回 {segments, srt}。",
+        descEditorAction: "与 video_editor MCP 工具相同的 action 对象；写入仍受同源与 revision CAS 保护。",
+        descEditorEvents: "同源、Cookie 认证 SSE：工程 revision、校验状态与脱敏队列任务事件；禁止 query/Bearer token。",
+        editorIntro: "访问 /editor 使用纯文本方式浏览多个虚拟视频工程。project.vpe 是唯一可写文件；assets、.history、receipts 与 exports 可查看但只读。",
+        editorStep1: "创建或选择工程，打开 project.vpe；所有字段与 VPE 关键字均使用英文。",
+        editorStep2: "保存时携带 expected_revision，冲突不会覆盖本地脏缓冲区；SSE 会提示新的远端 revision。",
+        editorStep3: "先 Validate 当前已保存 revision，再 Export；队列状态通过脱敏 SSE 更新，断线时回退到 get_job 轮询。",
         mcpIntro: "端点 POST /mcp。JSON-RPC 2.0 方法：initialize、notifications/initialized、tools/list、tools/call。",
         mcpInstall: "MCP Token 由服务自动持久化且不会显示在公开状态中。管理员登录后使用“复制 Agent 提示词”，交给 Codex 或 Claude Code 自动识别客户端与项目级/全局配置；只更新 Video Work API MCP，不覆盖其他 MCP，最后验证注册。Token 轮换后请重新登录并复制新提示词。",
         toolStatus: "服务 / 模型 / FunClip 状态",
@@ -338,6 +323,7 @@
         toolGen: "返回本地 audio_path",
         toolGetGen: "查询生成任务",
         toolSubs: "路径须在 VWA_VIDEO_INPUT_DIR 下",
+        toolEditor: "唯一 MCP 工具。action 覆盖状态、声音、字幕、工程树/文件、revision 写入、Validate、Export、任务查询/取消、质量门禁与生命周期。",
         mcpNote: "集成时不得绕过同意确认、认证、文件大小/时长、逐字稿、所有权、路径沙箱或同源检查。",
         exStatus: "状态",
         exLogin: "登录（浏览器同源）",
@@ -354,6 +340,7 @@
         toc: "Contents",
         secAuth: "Auth & origin",
         secRest: "REST endpoints",
+        secEditor: "Video Project Editor",
         secMcp: "HTTP MCP",
         secExamples: "Examples",
         auth1: "Browser sessions use an HttpOnly, SameSite=Strict cookie vwa_session — never log its plaintext.",
@@ -386,6 +373,12 @@
         descSubtitles: "JSON {video_path} under VWA_VIDEO_INPUT_DIR; returns {segments, srt}.",
         descSubtitlesUpload:
           "multipart field video (≤2 GB, common video formats); the temp file is deleted after extraction; returns {segments, srt}.",
+        descEditorAction: "The same action object as the video_editor MCP tool; writes retain same-origin and revision CAS protection.",
+        descEditorEvents: "Same-origin, cookie-authenticated SSE for project revisions, validation state, and sanitized queue jobs; query and bearer tokens are rejected.",
+        editorIntro: "Open /editor to browse multiple virtual video projects as plain text. project.vpe is the only writable file; assets, .history, receipts, and exports are visible but read-only.",
+        editorStep1: "Create or select a project and open project.vpe. Every field and VPE keyword uses English naming.",
+        editorStep2: "Save with expected_revision. A conflict never replaces a dirty local buffer; SSE announces the newer remote revision.",
+        editorStep3: "Validate the current saved revision before Export. Sanitized SSE updates the queue, with get_job polling as the reconnect fallback.",
         mcpIntro: "Endpoint POST /mcp. JSON-RPC 2.0: initialize, notifications/initialized, tools/list, tools/call.",
         mcpInstall: "The service persists its MCP token automatically and never includes it in public status. After administrator login, use Copy agent prompt with Codex or Claude Code; it asks the client to detect project or global scope, update only the Video Work API MCP without overwriting other MCPs, and verify registration. After token rotation, sign in again and copy a new prompt.",
         toolStatus: "Service / model / FunClip status",
@@ -399,6 +392,7 @@
         toolGen: "Returns local audio_path",
         toolGetGen: "Fetch a generation job",
         toolSubs: "Path under VWA_VIDEO_INPUT_DIR",
+        toolEditor: "The sole MCP tool. Its action enum covers status, voices, subtitles, project trees/files, revision writes, Validate, Export, job lookup/cancel, quality gates, and lifecycle.",
         mcpNote: "Do not bypass consent, auth, size/duration, transcript, ownership, path sandbox, or same-origin checks.",
         exStatus: "Status",
         exLogin: "Login (browser same-origin)",

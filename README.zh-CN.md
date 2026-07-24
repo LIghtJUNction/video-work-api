@@ -15,7 +15,7 @@
 [![AUR：video-work-api-git](https://img.shields.io/aur/version/video-work-api-git?label=AUR&color=c9775e)](https://aur.archlinux.org/packages/video-work-api-git)
 [![MCP：HTTP](https://img.shields.io/badge/MCP-HTTP-62675f.svg)](#rest-api-与-http-mcp)
 
-[快速开始](#快速开始) · [项目亮点](#为什么选择-video-work-api) · [MCP 工具](#11-个-mcp-工具) · [安全](#安全与负责任使用) · [参与贡献](CONTRIBUTING.md)
+[快速开始](#快速开始) · [项目亮点](#为什么选择-video-work-api) · [MCP 工具](#video_editor-mcp-工具) · [安全](#安全与负责任使用) · [参与贡献](CONTRIBUTING.md)
 
 </div>
 
@@ -29,8 +29,8 @@
 ## 为什么选择 Video Work API？
 
 - **一个私有工作区，三种使用方式。** 你可以使用中英双语 Web 工作台、
-  集成基于管理员会话认证的 REST API，或向可信 AI Agent 提供 11 个
-  Bearer Token 认证的 MCP 工具。
+  集成基于管理员会话认证的 REST API，或向可信 AI Agent 提供一个整合后的
+  Bearer Token 认证 `video_editor` MCP 工具。
 - **把参考声音变成可复用资产。** 按说话人和风格整理音频，随资料库成长
   重命名项目，并通过一行或多行文案生成独立 WAV 文件。
 - **在同一服务中把视频转换为可用 SRT。** 提交沙箱目录路径或浏览器上传，
@@ -142,21 +142,102 @@ REST 涵盖初始化、登录/退出、Passkey、模型下载、说话人/音色
 经过认证的 WAV 获取和字幕提取。启动服务后可访问实时 `/docs` 页面查看精简
 端点参考。
 
-### 11 个 MCP 工具
+### `video_editor` MCP 工具
 
 | 工具 | 用途 |
 |---|---|
-| `get_status` | 查看服务、模型、FunClip 与 MCP 就绪状态 |
-| `list_speakers` | 列出说话人及其音色 |
-| `create_speaker` | 新建说话人条目 |
-| `rename_speaker` | 在保持名称唯一的前提下重命名说话人 |
-| `delete_speaker` | 仅在音色已移除后删除说话人 |
-| `add_voice_profile` | 使用精确逐字稿和 `confirm_rights=true` 导入沙箱内的参考音频 |
-| `rename_voice_profile` | 在保持同一说话人下风格名唯一的前提下重命名音色 |
-| `delete_voice_profile` | 删除没有生成历史的音色 |
-| `generate_speech` | 生成 CosyVoice3 语音，返回生成 ID/本地音频路径 |
-| `get_generation` | 查询生成状态与完成后的音频路径 |
-| `extract_video_subtitles` | 使用 FunClip stage-1 ASR 提取带时间码的 SRT 数据 |
+| `video_editor` | 列出/创建工程、浏览并按 revision 编辑 `project.vpe`、规划抽帧/封面、计算安全切点、运行质量门禁、管理凭证与生命周期、分配变体 ID，以及导出/查询/取消队列任务 |
+
+管理员登录后可访问生产版 `/editor`。界面采用已批准的原生代码工作台骨架与实时
+工程检查器：多个虚拟工程根、可展开目录树、标签页、带行号的纯文本编辑、解析后的
+时间轴/marker/transition/variant/gate 以及脱敏渲染队列保持同屏。
+`project.vpe` 是唯一可写文件；保存携带 `expected_revision`，远端更新绝不会覆盖
+本地脏缓冲区。认证且同源的 `GET /api/editor/events` SSE 会发送初始工程/任务状态
+及脱敏 revision/job 变化，不接受 Bearer/query token，也不暴露私有路径；重连期间
+界面回退到 `get_job` 轮询。
+
+每个工程都是虚拟文件夹，唯一可写文件是 `project.vpe`；生成的
+`.history/`、`receipts/`、`exports/` 可浏览但只读。写入必须携带
+`expected_revision`；内容先写入私有临时文件并 `fsync`，再登记 durable write
+intent，随后原子发布。进程中断后，会在工程锁内从通过 SHA-256 校验的 staged、
+history 或 current 副本向前恢复。history 采用 create-only 的 hash 命名文件，
+只有 history 与 `project.vpe` 均落盘后 DB revision 才会推进。只有当前且已校验的
+revision 可以导出。
+
+同一工具还提供真实排队执行的 `extract_analysis_frames`、
+`analyze_safe_trims` 与 `render_cover`。它们共用持久 FIFO 单 Worker 队列、
+固定服务端 FFmpeg/FFprobe、私有输入快照、取消、超时和进程组恢复。抽帧默认
+12 帧、360x640，所有时间戳严格早于 EOF，并生成带白色时间戳/分段 ASR
+元数据栏的图片；不执行 VLM 分析。安全切点从真实音轨检测静音，再调用保守切点
+算法；未提供词级时间戳且已配置 FunClip 时，会在冻结输入上运行固定 stage-1
+ASR，严格解析真实 token 时间戳，绝不插值。字幕提取同时返回分段、SRT 与词级
+时间戳。封面操作必须指定当前 VPE 声明的稳定 variant key，并绑定当前工程
+revision、document、VariantSpec 与 CoverSpec；两张图片实际解码通过后才发布
+`<variant-key>-cover-original.png` 与 `<variant-key>.jpg`。pre-package 只接受
+按 variant key 提交的 succeeded cover job ID，不接受调用方自述路径或哈希。
+渲染器只能写入私有 `attempt-1/` 目录。校验完成后，Worker 会持久登记有序
+publication intent，绑定每个源/目标相对路径、大小与 SHA-256；随后通过固定的
+工程/exports 目录描述符、已 fsync 的临时文件和 no-replace rename 发布。重启时，
+已有 intent 会直接向前完成而不重新渲染；没有 intent 的残留 attempt 会先安全
+删除再重新排队。取消与发布通过同一个数据库 CAS 决胜：取消先落库时不会发布
+任何文件并进入 cleanup-pending；intent 先落库时后续取消为 no-op，发布继续完成。
+目标已有相同内容时视为成功；内容冲突时保留既有 exports，
+任务保持 running 且标记 publication-blocked，并停止后续 claim 供运维检查。
+封面双文件、视频多文件与报告均使用同一协议；只有数据库提交 succeeded 后，
+私有 attempt 才进入 cleanup-pending。
+`get_job` 只返回公开任务状态与工程相对交付路径，不泄露私有快照、日志、计划绝对
+路径、执行器参数或内部错误；失败只返回有限公开 code 与通用消息。任务终态会删除冻结源媒体及私有 Replay 媒体，同时保留规范
+计划、已验证报告、日志和公开分析结果。
+清理和归档默认 `dry_run: true`，只有显式传入 `dry_run: false` 且沙箱、
+白名单和服务端门禁全部通过时才会修改文件。清理只接受服务定义的 `cache/`、
+`proxies/`、`passes/` 路径，工程核心 `.tmp/` 永不清理。源素材归档会验证当前
+revision 的完整凭证链，通过 durable journal/staging 只搬迁 VPE 声明的
+`project/assets` 素材，并始终保留 exports。Master 与每个变体都必须具备有效
+`ftyp` 且 `moov` 位于 `mdat` 前。pre-package 与 acceptance 只接受精确匹配当前
+工程 revision 的 succeeded `video_project` 任务 ID；Worker 在重新计算主输出、
+Replay、报告和每个变体的 index、语言、画幅、水印、CTA、路径及哈希后，才写入
+数据库可信证明。调用方不能提交报告路径或自述 Replay。每个变体必须使用不同
+路径和不同成片，copy/封面声明哈希均会按实际文件重算。不可变 PASS 报告与凭证按
+`receipts/rev-<n>/<phase>/` 保存；签名绑定精确报告哈希、工程、revision、
+document、门禁结果、输入输出、执行器和上一凭证。FAIL 或签名不可用都不会占用
+canonical PASS 路径；配置 key 后可对同一 revision 重试。
+
+全英文 VPE 文档描述 canvas、source、track、clip、cut、hold、transition、
+marker、variant 与 gate：
+
+```text
+project "Aurora Launch" {
+  canvas 1080x1920 @ 30fps
+  source host = "assets/host.mp4"
+  source detail = "assets/detail.mp4"
+  timeline {
+    track main primary {
+      clip host source 00:00:00.000..00:00:03.120 at 00:00:00.000
+      cut at 00:00:03.120
+      transition cross_dissolve at 00:00:03.120 duration 00:00:00.200
+      clip host source 00:00:03.120..00:00:06.200 at 00:00:03.120
+    }
+    track overlay product type broll {
+      clip detail source 00:00:00.000..00:00:01.000 at 00:00:02.000
+    }
+    track overlay graphics type effect {
+      effect vignette at 00:00:02.800..00:00:03.200
+    }
+  }
+  marker "Opening hook" at 00:00:03.000
+  variant "ZH-EN" aspect 9:16 subtitles "subs.zh-en.ass" watermark "brand/logo.png" cta "Learn more"
+  gate pre_render require input_manifest, continuous_timeline, opening_hook, subtitle_overflow
+  gate pre_package require output_specifications, cover_match, copy_consistency
+  gate acceptance require deterministic_replay, faststart
+}
+```
+
+`export` 会把当前已校验 revision 编译成不可变的 canonical EDL bundle。持久化
+单并发 worker 会再次核验文档、渲染器与冻结工程素材哈希，先生成 `master.mp4`，
+再派生所声明的画幅/字幕/水印/CTA 变体，并写入虚拟工程只读的 `exports/` 树。
+命名主轨会按等时长图层合成并混音，变体使用稳定的序号/语言/画幅 key。未知
+动效或转场、符号链接素材和过期 revision 都会 fail closed。
+旧的 XRY 直接 REST/MCP 渲染提交入口已禁用。
 
 管理员登录后，**复制 Agent 提示词**会提供 Codex 与 Claude Code 的安装说明。
 项目级配置分别使用 Codex 的 `.codex/config.toml` 或 Claude Code 的
@@ -207,7 +288,11 @@ Token 默认保存在 `$VWA_DATA_DIR/mcp-token`，重启和升级后保持不变
 
 配置变量使用 `VWA_*` 前缀。常用设置包括 `VWA_DATA_DIR`、`VWA_MODEL_DIR`、
 `VWA_COSYVOICE_ROOT`、`VWA_FUNCLIP_ROOT`、`VWA_HOST`、`VWA_PORT`、
-`VWA_VIDEO_INPUT_DIR`、`VWA_REFERENCE_INPUT_DIR`、`VWA_MCP_TOKEN_FILE`，
+`VWA_VIDEO_INPUT_DIR`、`VWA_REFERENCE_INPUT_DIR`、`VWA_MCP_TOKEN_FILE`、
+`VWA_VIDEO_PROJECTS_DIR`、
+`VWA_RECEIPT_KEY_FILE`、
+`VWA_XRY_TASK_ROOT`、`VWA_XRY_SOURCE_ROOT`、`VWA_XRY_RENDERER`、`VWA_XRY_PYTHON`、
+`VWA_RENDER_TIMEOUT`，
 以及可选的 `VWA_SSL_CERTFILE` / `VWA_SSL_KEYFILE`。证书和密钥路径只会按成对、
 常规非符号链接文件进行校验，并不会启用内置 HTTPS；服务仍通过 HTTP 提供。
 如需非 localhost 或局域网浏览器安全上下文，请使用 HTTPS 反向代理。
@@ -225,6 +310,31 @@ Token 默认保存在 `$VWA_DATA_DIR/mcp-token`，重启和升级后保持不变
 
 源码安装时使用 `vwactl paths` 和 `vwactl status` 查看生效配置。对软件包安装的
 单元显式执行 `systemctl start`、`stop` 或 `restart`；不要假定它已经启用。
+
+XRY 渲染必须通过专用只读组部署 receipt key，不要把服务加入宽泛的运维组：
+
+```bash
+sudo groupadd --system --force xry-render
+sudo usermod --append --groups xry-render video-work-api
+sudo usermod --append --groups xry-render xry
+sudo python /srv/xry/.agents/skills/xry-video-acceptance/scripts/generate_receipt_key.py
+sudo chown root:xry-render /etc/xry/render-receipt.hmac.key
+sudo chmod 0640 /etc/xry/render-receipt.hmac.key
+```
+
+软件包单元声明 `SupplementaryGroups=xry-render`；安装钩子会创建该组，将
+`video-work-api` 和已存在的 `xry` 账号加入组，并把已有 key 规范为
+`root:xry-render`、`0640`。钩子不会 enable 或启动服务。
+
+Video Project 导出进入持久 FIFO 队列。数据库约束和独占 worker lease 保证跨进程
+全局最多只有一个运行任务。取消、超时、渲染器错误和服务关机都会终止整个
+渲染器进程组并释放槽位。FIFO 使用持久化单调入队序号，不依赖墙钟时间或
+UUID。每个任务持有绑定工程、revision 与文档哈希的 canonical EDL 和冻结素材
+快照；独立二次渲染的所有输出必须逐字节哈希一致。异常重启后，durable launch
+handshake 会覆盖 spawn 到数据库写 PID 的窗口。PID/starttime 落库后，即使
+handshake 丢失或损坏，也会独立核验 `/proc` 进程组与固定执行器/job cmdline。
+发信号前先持久化 recovery intent；身份不明确时任务保持 `running` 并阻止继续
+取任务。终态清理同样用 cleanup-pending 标志持续重试至完成。
 
 </details>
 

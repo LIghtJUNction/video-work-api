@@ -1,21 +1,32 @@
 //! Video Work API — authorized zero-shot voice cloning and FunClip subtitles.
 
+pub mod alignment;
 pub mod audio;
 pub mod config;
+pub mod cover;
 pub mod database;
 pub mod engine;
 pub mod error;
 pub mod filenames;
 pub mod http;
 pub mod importer;
+pub mod lifecycle;
 pub mod mcp;
 pub mod mcp_token;
 pub mod model;
 pub mod passkeys;
 pub mod paths;
+pub mod project_render;
+pub mod provenance;
+pub mod quality;
+pub mod render_queue;
+pub mod sampling;
 pub mod security;
 pub mod studio;
 pub mod subtitles;
+pub mod timeline;
+pub mod video_editor;
+pub mod vpe;
 
 pub use config::Settings;
 pub use error::{AppError, AppResult};
