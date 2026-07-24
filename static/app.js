@@ -107,6 +107,22 @@ const translations = {
     downloadSrt: "下载 SRT",
     subtitlesEmpty: "未识别到字幕片段。",
     subtitlePreview: "字幕片段预览",
+    translateEyebrow: "TRANSLATE",
+    translateTitle: "多语言翻译",
+    translateLead: "使用 MADLAD-400-3B 翻译纯文本或 SRT；英文与俄语排在语言列表前两位。",
+    targetLang: "目标语言",
+    translateText: "文本或 SRT",
+    runTranslate: "翻译",
+    downloadTranslationModel: "下载翻译模型",
+    downloadingTranslationModel: "翻译模型下载中…",
+    confirmTranslationDownload: "MADLAD-400-3B 约需 12 GB 网络与磁盘空间，确认开始下载吗？",
+    translationModelMissing: "翻译模型未就绪，请先下载 MADLAD-400-3B。",
+    translationModelDownloadFailed: "翻译模型下载失败，请查看服务日志后重试。",
+    translateEmpty: "请输入要翻译的文本或 SRT。",
+    translateHint: "首次使用需下载约 12 GB 权重。识别为 SRT 时会保留时间轴。",
+    translateReady: "翻译完成",
+    translationModelReady: "翻译模型已就绪",
+    translationModelMissingBadge: "翻译模型未下载",
   },
   en: {
     title: "Video Work API",
@@ -217,6 +233,22 @@ const translations = {
     downloadSrt: "Download SRT",
     subtitlesEmpty: "No subtitle segments detected.",
     subtitlePreview: "Subtitle segment preview",
+    translateEyebrow: "TRANSLATE",
+    translateTitle: "Translate",
+    translateLead: "Translate plain text or SRT with MADLAD-400-3B. English and Russian are listed first.",
+    targetLang: "Target language",
+    translateText: "Text or SRT",
+    runTranslate: "Translate",
+    downloadTranslationModel: "Download translation model",
+    downloadingTranslationModel: "Downloading translation model…",
+    confirmTranslationDownload: "MADLAD-400-3B needs about 12 GB of network traffic and disk. Start now?",
+    translationModelMissing: "Translation model is not ready. Download MADLAD-400-3B first.",
+    translationModelDownloadFailed: "Translation model download failed. Check service logs, then retry.",
+    translateEmpty: "Enter text or SRT to translate.",
+    translateHint: "First use downloads about 12 GB of weights. SRT input keeps timestamps.",
+    translateReady: "Translation complete",
+    translationModelReady: "Translation model ready",
+    translationModelMissingBadge: "Translation model missing",
   },
 };
 
@@ -585,6 +617,10 @@ async function boot() {
       setAgentPromptAvailable(status.mcp?.configured === true);
       await refresh();
       if (status.model_present === false) await refreshModelDownloadStatus();
+      await loadTranslationLanguages();
+      if (status.translation && status.translation.present === false) {
+        await refreshTranslationDownloadStatus();
+      }
     }
   } catch (error) {
     notice(error.message);
@@ -1770,6 +1806,196 @@ if (subtitleForm) {
 const retrySubtitleFailures = $("#retrySubtitleFailures");
 if (retrySubtitleFailures) {
   retrySubtitleFailures.onclick = () => runSubtitleJobs(subtitleJobs.filter((job) => job.status === "failed"));
+}
+
+let translationDownloadPoll = null;
+let lastTranslatedSrt = "";
+let translationLanguagesLoaded = false;
+
+function looksLikeSrt(text) {
+  return /\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,.]\d{3}/.test(
+    String(text || ""),
+  );
+}
+
+function stopTranslationDownloadPolling() {
+  if (translationDownloadPoll !== null) clearTimeout(translationDownloadPoll);
+  translationDownloadPoll = null;
+}
+
+async function refreshTranslationDownloadStatus() {
+  // Same single-flight download protocol as voice: GET status → poll while running.
+  const button = $("#downloadTranslationModel");
+  if (!button) return;
+  try {
+    const status = await api("/api/model/download-translation");
+    const present = status.model_present === true || status.present === true;
+    const running = status.state === "running";
+    button.disabled = running;
+    button.textContent = running
+      ? t("downloadingTranslationModel")
+      : t("downloadTranslationModel");
+    button.classList.toggle("hidden", present);
+    if (present) {
+      stopTranslationDownloadPolling();
+      await loadTranslationLanguages();
+    } else if (status.state === "failed" || status.state === "succeeded") {
+      stopTranslationDownloadPolling();
+      notice(t("translationModelDownloadFailed"));
+    } else if (running) {
+      stopTranslationDownloadPolling();
+      translationDownloadPoll = setTimeout(refreshTranslationDownloadStatus, 2000);
+    }
+  } catch (error) {
+    stopTranslationDownloadPolling();
+    notice(error.message);
+  }
+}
+
+async function loadTranslationLanguages() {
+  const select = $("#targetLang");
+  if (!select) return;
+  try {
+    const payload = await api("/api/translate/languages");
+    const languages = payload.languages || [];
+    if (!languages.length) return;
+    const previous = select.value || "en";
+    select.innerHTML = "";
+    for (const lang of languages) {
+      const option = document.createElement("option");
+      option.value = lang.code;
+      const label =
+        language === "zh"
+          ? `${lang.name_zh} (${lang.code})`
+          : `${lang.name_en} (${lang.code})`;
+      option.textContent = label;
+      select.appendChild(option);
+    }
+    // en then ru are first from the API; keep the user's prior selection when possible.
+    select.value = [...select.options].some((o) => o.value === previous)
+      ? previous
+      : languages[0].code;
+    translationLanguagesLoaded = true;
+    const downloadBtn = $("#downloadTranslationModel");
+    if (downloadBtn) {
+      downloadBtn.classList.toggle("hidden", payload.ready === true || payload.present === true);
+    }
+    const status = $("#translateStatus");
+    if (status) {
+      status.textContent =
+        payload.ready || payload.present
+          ? t("translationModelReady")
+          : t("translationModelMissingBadge");
+    }
+  } catch (error) {
+    notice(error.message);
+  }
+}
+
+async function runTranslate() {
+  const input = $("#translateInput");
+  const target = $("#targetLang");
+  const errorNode = $("#translateError");
+  const resultBox = $("#translateResult");
+  const output = $("#translateOutput");
+  const downloadSrt = $("#downloadTranslatedSrt");
+  if (!input || !target) return;
+  const text = String(input.value || "").trim();
+  if (errorNode) errorNode.textContent = "";
+  if (!text) {
+    if (errorNode) errorNode.textContent = t("translateEmpty");
+    return;
+  }
+  const button = $("#translateButton");
+  if (button) {
+    button.disabled = true;
+    button.textContent = t("working");
+  }
+  notice("");
+  lastTranslatedSrt = "";
+  try {
+    const body = { target_lang: target.value };
+    if (looksLikeSrt(text)) body.srt = text;
+    else body.text = text;
+    const result = await api("/api/translate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    if (result.srt) {
+      lastTranslatedSrt = result.srt;
+      if (output) output.textContent = result.srt;
+    } else if (result.text) {
+      if (output) output.textContent = result.text;
+    } else if (Array.isArray(result.translations)) {
+      if (output) output.textContent = result.translations.join("\n");
+    } else {
+      if (output) output.textContent = JSON.stringify(result, null, 2);
+    }
+    if (resultBox) resultBox.classList.remove("hidden");
+    if (downloadSrt) downloadSrt.classList.toggle("hidden", !lastTranslatedSrt);
+    notice(t("translateReady"));
+  } catch (error) {
+    if (error.code === "translation_model_missing") {
+      notice(t("translationModelMissing"));
+      const downloadBtn = $("#downloadTranslationModel");
+      if (downloadBtn) downloadBtn.classList.remove("hidden");
+    } else {
+      notice(error.message || t("failed"));
+    }
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = t("runTranslate");
+    }
+  }
+}
+
+const translateForm = $("#translateForm");
+if (translateForm) {
+  translateForm.onsubmit = async (event) => {
+    event.preventDefault();
+    if (logoutInProgress) return;
+    await runTranslate();
+  };
+}
+
+const downloadTranslationModelBtn = $("#downloadTranslationModel");
+if (downloadTranslationModelBtn) {
+  downloadTranslationModelBtn.onclick = async () => {
+    // Mirrors #modelDownload: confirm size → POST → poll status.
+    if (!window.confirm(t("confirmTranslationDownload"))) return;
+    try {
+      downloadTranslationModelBtn.disabled = true;
+      downloadTranslationModelBtn.textContent = t("downloadingTranslationModel");
+      await api("/api/model/download-translation", { method: "POST", body: "{}" });
+      notice("");
+      await refreshTranslationDownloadStatus();
+    } catch (error) {
+      downloadTranslationModelBtn.disabled = false;
+      downloadTranslationModelBtn.textContent = t("downloadTranslationModel");
+      if (error.code === "model_download_running") {
+        await refreshTranslationDownloadStatus();
+      } else {
+        notice(error.message);
+      }
+    }
+  };
+}
+
+const downloadTranslatedSrtBtn = $("#downloadTranslatedSrt");
+if (downloadTranslatedSrtBtn) {
+  downloadTranslatedSrtBtn.onclick = () => {
+    if (!lastTranslatedSrt) return;
+    const blob = new Blob([lastTranslatedSrt], { type: "application/x-subrip;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `translated-${($("#targetLang")?.value || "lang")}.srt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
 }
 
 async function copyTextToClipboard(text) {

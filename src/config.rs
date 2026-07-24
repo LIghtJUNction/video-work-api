@@ -9,6 +9,8 @@ use anyhow::{Context, Result};
 pub struct Settings {
     pub data_dir: PathBuf,
     pub model_dir: PathBuf,
+    /// MADLAD-400-3B-MT weights for machine translation.
+    pub translation_model_dir: PathBuf,
     pub cosyvoice_root: PathBuf,
     pub setup_token_file: PathBuf,
     pub host: String,
@@ -24,6 +26,7 @@ pub struct Settings {
     pub video_projects_dir: PathBuf,
     pub receipt_key_file: PathBuf,
     pub subtitle_timeout_seconds: u64,
+    pub translation_timeout_seconds: u64,
     pub xry_task_root: PathBuf,
     pub xry_source_root: PathBuf,
     pub xry_renderer: PathBuf,
@@ -58,6 +61,10 @@ impl Settings {
         let model = env_path(
             "VWA_MODEL_DIR",
             data.join("models").join("Fun-CosyVoice3-0.5B-2512"),
+        );
+        let translation_model = env_path(
+            "VWA_TRANSLATION_MODEL_DIR",
+            data.join("models").join("madlad400-3b-mt"),
         );
         let cosyvoice = env_path(
             "VWA_COSYVOICE_ROOT",
@@ -110,6 +117,7 @@ impl Settings {
         Ok(Self {
             data_dir: data,
             model_dir: model,
+            translation_model_dir: translation_model,
             cosyvoice_root: cosyvoice,
             setup_token_file: token,
             host: env::var("VWA_HOST").unwrap_or_else(|_| "0.0.0.0".into()),
@@ -131,6 +139,10 @@ impl Settings {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1800),
+            translation_timeout_seconds: env::var("VWA_TRANSLATION_TIMEOUT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(600),
             xry_task_root,
             xry_source_root,
             xry_renderer,

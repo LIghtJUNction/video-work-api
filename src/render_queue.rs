@@ -3482,6 +3482,7 @@ mod tests {
     use crate::engine::FakeEngine;
     use crate::studio::Studio;
     use crate::subtitles::FakeSubtitles;
+    use crate::translation::FakeTranslationEngine;
     use tempfile::tempdir;
 
     fn studio(root: &Path) -> Studio {
@@ -3516,6 +3517,7 @@ mod tests {
         let settings = Settings {
             data_dir: root.join("data"),
             model_dir: root.join("model"),
+        translation_model_dir: root.join("translation-model"),
             cosyvoice_root: root.join("cosy"),
             setup_token_file: root.join("setup"),
             host: "127.0.0.1".into(),
@@ -3531,6 +3533,7 @@ mod tests {
             video_projects_dir: root.join("video-projects"),
             receipt_key_file: root.join("receipt.key"),
             subtitle_timeout_seconds: 30,
+        translation_timeout_seconds: 30,
             xry_task_root: task_root,
             xry_source_root: root.join("sources"),
             xry_renderer: root.join("renderer.py"),
@@ -3547,6 +3550,7 @@ mod tests {
             Database::open(root.join("data/db.sqlite")).unwrap(),
             Arc::new(FakeEngine::new()),
             Arc::new(FakeSubtitles::default()),
+            Arc::new(FakeTranslationEngine::new()),
         )
     }
 

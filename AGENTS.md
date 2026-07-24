@@ -5,6 +5,8 @@
 - Voice model: FunAudioLLM/Fun-CosyVoice3-0.5B-2512, not Qwen3-TTS.
   Inference helper: `scripts/cosyvoice_infer.py` (Python + vendored CosyVoice).
 - Subtitles: FunClip (`vendor/FunClip`) stage-1 ASR with time-coded SRT segments.
+- Translation: `google/madlad400-3b-mt` via `scripts/madlad_translate.py`;
+  languages list puts English then Russian first for UI convenience.
 - Service: `video-work-api.service`; default port: `7860`.
 - MCP: `POST /mcp` with `Authorization: Bearer <VWA_MCP_TOKEN>`.
 - Installed app/config/data paths: `/usr/lib/video-work-api`,

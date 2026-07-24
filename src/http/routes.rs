@@ -29,7 +29,10 @@ use crate::audio::{extension_allowed, MAX_UPLOAD_BYTES};
 use crate::error::{AppError, AppResult};
 use crate::filenames::{content_disposition_attachment, download_name_from_text};
 use crate::mcp::{handle_mcp_message, McpResponse};
-use crate::model::{download_model, model_files_present, ModelDownloadManager};
+use crate::model::{
+    download_model_kind, model_kind_files_present, model_kind_status, ModelDownloadRegistry,
+    ModelKind,
+};
 use crate::passkeys::{CeremonyStore, CeremonyStoreError, PasskeyWebauthn, PendingCeremony};
 use crate::paths::safe_owned_file;
 use crate::render_queue;
@@ -38,7 +41,7 @@ use crate::security::{
     verify_password,
 };
 use crate::studio::{Studio, StudioError};
-use crate::subtitles::{video_extension_allowed, MAX_VIDEO_UPLOAD_BYTES};
+use crate::subtitles::{video_extension_allowed, SubtitleSegment, MAX_VIDEO_UPLOAD_BYTES};
 use crate::video_editor::{self, EditorError, VideoEditorRequest};
 use crate::{target_text_is_valid, COOKIE_NAME};
 
@@ -47,7 +50,8 @@ pub struct AppState {
     pub studio: Arc<Studio>,
     pub limiter: Arc<LoginLimiter>,
     pub passkey_ceremonies: Arc<CeremonyStore>,
-    pub model_download: Arc<ModelDownloadManager>,
+    /// Independent single-flight managers for voice and translation weights.
+    pub model_downloads: Arc<ModelDownloadRegistry>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -67,6 +71,15 @@ pub fn build_router(state: AppState) -> Router {
             "/api/model/download",
             get(model_download_status).post(start_model_download),
         )
+        .route(
+            "/api/model/download-translation",
+            get(translation_download_status).post(start_translation_download),
+        )
+        .route(
+            "/api/translate/languages",
+            get(list_translation_languages),
+        )
+        .route("/api/translate", post(translate_text))
         .route("/api/auth/passkeys", get(list_passkeys))
         .route(
             "/api/auth/passkeys/register/start",
@@ -985,57 +998,204 @@ async fn get_mcp_token(State(state): State<AppState>, jar: CookieJar) -> AppResu
         .into_response())
 }
 
-async fn model_download_status(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> AppResult<Json<Value>> {
-    require_auth(&state, &jar)?;
-    Ok(Json(json!({
-        "state": state.model_download.state().as_str(),
-        "model_present": model_files_present(&state.studio.settings),
-    })))
+fn python_runtime_ready_for_status(studio: &Studio) -> bool {
+    if let Ok(p) = std::env::var("VWA_PYTHON") {
+        if PathBuf::from(p).is_file() {
+            return true;
+        }
+    }
+    studio.settings.data_dir.join(".venv/bin/python").is_file()
 }
 
-async fn start_model_download(
-    State(state): State<AppState>,
-    jar: CookieJar,
+fn model_loaded_flag(studio: &Studio, kind: ModelKind) -> bool {
+    match kind {
+        ModelKind::Voice => studio.engine.loaded(),
+        ModelKind::Translation => studio.translation.loaded(),
+    }
+}
+
+async fn model_download_status_for(
+    state: &AppState,
+    jar: &CookieJar,
+    kind: ModelKind,
+) -> AppResult<Json<Value>> {
+    require_auth(state, jar)?;
+    let runtime_ready = python_runtime_ready_for_status(&state.studio);
+    let loaded = model_loaded_flag(&state.studio, kind);
+    Ok(Json(model_kind_status(
+        &state.studio.settings,
+        kind,
+        state.model_downloads.manager(kind).state(),
+        runtime_ready,
+        loaded,
+    )))
+}
+
+async fn start_model_download_for(
+    state: &AppState,
+    jar: &CookieJar,
+    kind: ModelKind,
 ) -> AppResult<Response> {
-    require_auth(&state, &jar)?;
-    if model_files_present(&state.studio.settings) {
+    require_auth(state, jar)?;
+    let present = model_kind_files_present(&state.studio.settings, kind);
+    if present {
+        let runtime_ready = python_runtime_ready_for_status(&state.studio);
+        let loaded = model_loaded_flag(&state.studio, kind);
         return Ok((
             StatusCode::OK,
-            Json(json!({ "state": "succeeded", "model_present": true })),
+            Json(model_kind_status(
+                &state.studio.settings,
+                kind,
+                state.model_downloads.manager(kind).state(),
+                runtime_ready,
+                loaded,
+            )),
         )
             .into_response());
     }
-    if !state.model_download.try_start() {
+    let manager = state.model_downloads.manager(kind);
+    if !manager.try_start() {
         return Err(AppError::api(
             StatusCode::CONFLICT,
             "model_download_running",
-            "Model download is already running",
+            format!("{} model download is already running", kind.as_str()),
         ));
     }
-    let manager = state.model_download.clone();
+    let registry = state.model_downloads.clone();
     let settings = state.studio.settings.clone();
     tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || download_model(&settings)).await;
+        let result =
+            tokio::task::spawn_blocking(move || download_model_kind(&settings, kind)).await;
+        let manager = registry.manager(kind);
         match result {
             Ok(Ok(())) => manager.finish(true),
             Ok(Err(error)) => {
-                tracing::error!(error = %error, "Model download failed");
+                tracing::error!(kind = kind.as_str(), error = %error, "Model download failed");
                 manager.finish(false);
             }
             Err(error) => {
-                tracing::error!(error = %error, "Model download task failed");
+                tracing::error!(kind = kind.as_str(), error = %error, "Model download task failed");
                 manager.finish(false);
             }
         }
     });
     Ok((
         StatusCode::ACCEPTED,
-        Json(json!({ "state": "running", "model_present": false })),
+        Json(model_kind_status(
+            &state.studio.settings,
+            kind,
+            state.model_downloads.manager(kind).state(),
+            python_runtime_ready_for_status(&state.studio),
+            model_loaded_flag(&state.studio, kind),
+        )),
     )
         .into_response())
+}
+
+async fn model_download_status(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> AppResult<Json<Value>> {
+    model_download_status_for(&state, &jar, ModelKind::Voice).await
+}
+
+async fn start_model_download(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> AppResult<Response> {
+    start_model_download_for(&state, &jar, ModelKind::Voice).await
+}
+
+async fn translation_download_status(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> AppResult<Json<Value>> {
+    model_download_status_for(&state, &jar, ModelKind::Translation).await
+}
+
+async fn start_translation_download(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> AppResult<Response> {
+    start_model_download_for(&state, &jar, ModelKind::Translation).await
+}
+
+#[derive(Debug, Deserialize)]
+struct TranslateBody {
+    target_lang: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    texts: Option<Vec<String>>,
+    #[serde(default)]
+    srt: Option<String>,
+    #[serde(default)]
+    segments: Option<Vec<SubtitleSegment>>,
+}
+
+async fn list_translation_languages(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> AppResult<Json<Value>> {
+    require_auth(&state, &jar)?;
+    Ok(Json(state.studio.list_translation_languages()))
+}
+
+async fn translate_text(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(body): Json<TranslateBody>,
+) -> AppResult<Json<Value>> {
+    require_auth(&state, &jar)?;
+    let studio = state.studio.clone();
+    let target_lang = body.target_lang;
+    let text = body.text;
+    let texts = body.texts;
+    let srt = body.srt;
+    let segments = body.segments;
+    let result = tokio::task::spawn_blocking(move || {
+        studio.translate(
+            &target_lang,
+            text.as_deref(),
+            texts.as_deref(),
+            srt.as_deref(),
+            segments.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.into()))?;
+    match result {
+        Ok(v) => Ok(Json(v)),
+        Err(e) => Err(translate_error(&e)),
+    }
+}
+
+fn translate_error(e: &anyhow::Error) -> AppError {
+    let msg = e.to_string();
+    if msg.contains("not ready") || msg.contains("not installed") {
+        AppError::api(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "translation_model_missing",
+            msg,
+        )
+    } else if msg.contains("target_lang")
+        || msg.contains("Nothing to translate")
+        || msg.contains("must not be empty")
+        || msg.contains("exceeds")
+        || msg.contains("At most")
+        || msg.contains("Provide text")
+        || msg.contains("srt contained")
+        || msg.contains("required")
+    {
+        AppError::invalid_request(msg)
+    } else {
+        tracing::warn!(error = %msg, "Translation failed");
+        AppError::api(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "translation_failed",
+            msg,
+        )
+    }
 }
 
 async fn list_speakers(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json<Value>> {

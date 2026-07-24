@@ -25,6 +25,7 @@ pub mod security;
 pub mod studio;
 pub mod subtitles;
 pub mod timeline;
+pub mod translation;
 pub mod video_editor;
 pub mod vpe;
 

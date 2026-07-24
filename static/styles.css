@@ -591,6 +591,29 @@ code {
 .method.patch { color: var(--paper); background: var(--clay-deep, #7a5a45); }
 .method.del { color: var(--paper); background: var(--danger); }
 
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.result-pre {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--paper-2);
+  border: 1px solid var(--line-soft);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.86rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 28rem;
+  overflow: auto;
+}
+
 /* ——— responsive ——— */
 @media (max-width: 820px) {
   .hero { grid-template-columns: 1fr; padding: 56px 0 46px; gap: 34px; }

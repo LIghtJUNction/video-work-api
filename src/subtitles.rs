@@ -10,12 +10,13 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::alignment::WordTimestamp;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubtitleSegment {
+    #[serde(default)]
     pub index: usize,
     pub start: String,
     pub end: String,
