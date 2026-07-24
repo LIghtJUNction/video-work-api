@@ -23,10 +23,14 @@ never log or persist its plaintext value.
   WebAuthn requires an HTTPS domain, except that `http://localhost:<port>` is
   supported for local development. IP-literal origins are not supported. The
   admin password remains enabled as a recovery login.
-- `POST /api/model/download` starts the fixed, pinned CosyVoice3 download in a
-  single background task; `GET /api/model/download` returns its safe status.
-  Both require an authenticated session. Expect roughly 10 GB of network and
-  disk use, and install the Hugging Face CLI first.
+- Model weights (voice CosyVoice3 and translation MADLAD-400-3B) share one
+  download mechanism: HF CLI via a pinned Python helper, required-file presence
+  checks, and independent single-flight background tasks. Lazy load happens on
+  first inference, not at process start.
+- `POST /api/model/download` starts the CosyVoice3 download; `GET` returns
+  `{kind,id,state,model_present,ready,loaded,download_path}`. Expect ~10 GB.
+- `POST /api/model/download-translation` is the same protocol for MADLAD-400-3B
+  (~12 GB). Both require an authenticated session and the Hugging Face CLI.
 - `GET /api/speakers` lists the private voice library.
 - `POST /api/speakers` accepts JSON `name`.
 - `DELETE /api/speakers/{id}` requires profiles to be deleted first.
@@ -38,6 +42,13 @@ never log or persist its plaintext value.
 - `GET /api/generations/{id}/audio` returns an authenticated WAV response.
 - `POST /api/videos/subtitles` accepts JSON `video_path` relative to
   `VWA_VIDEO_INPUT_DIR` and returns `{segments, srt}` with precise timestamps.
+- `GET /api/translate/languages` lists curated target languages for MADLAD-400-3B.
+  English (`en`) and Russian (`ru`) are listed first for convenient selection;
+  any ISO 639 MADLAD target code is also accepted by the translate endpoint.
+- `POST /api/translate` accepts JSON `target_lang` plus one of `text`, `texts`,
+  `srt`, or `segments`. Returns translated plain text and/or `{segments, srt}`
+  while preserving subtitle timings. Requires the MADLAD model on disk.
+
 - `POST /api/editor` accepts the same action object as the `video_editor` MCP
   tool. It requires an authenticated, same-origin administrator session.
   `write_file` is limited to `project.vpe`, requires `expected_revision`, and
@@ -75,7 +86,12 @@ The advertised tool surface contains exactly one tool:
 
 | Tool | Purpose |
 |------|---------|
-| `video_editor` | Sole MCP surface for status, speakers, consent-gated profiles, generation/subtitles, virtual projects, queued real-media sampling/trims/covers, gates, lifecycle, exports, job status, and cancellation |
+| `video_editor` | Sole MCP surface for status, speakers, consent-gated profiles, generation/subtitles/translation, virtual projects, queued real-media sampling/trims/covers, gates, lifecycle, exports, job status, and cancellation |
+
+Translation actions on `video_editor`:
+
+- `list_translation_languages` — curated languages (en, ru first) plus readiness
+- `translate` — `{target_lang, text?|texts?|srt?|segments?}` using MADLAD-400-3B
 
 Every project has one writable source of truth, `project.vpe`. Generated
 `.history/`, `receipts/`, and `exports/` entries are visible but read-only.

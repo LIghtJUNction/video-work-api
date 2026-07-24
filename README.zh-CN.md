@@ -50,8 +50,9 @@
 | Agent 辅助制作 | 让 Codex 或其他 MCP 客户端列出音色、生成语音和提取字幕 |
 | 小团队声音资料库 | 在中英双语、密码保护的浏览器工作台中管理说话人与音色 |
 
-项目有意保持明确边界：它不负责视频剪辑、字幕翻译、FunClip stage-2
-裁剪，也不会替你判断是否已经获得合法授权。
+项目有意保持明确边界：它不负责 FunClip stage-2 裁剪，也不会替你判断是否
+已经获得合法授权。纯文本与 SRT 机器翻译由 MADLAD-400-3B 提供
+（`POST /api/translate`）。
 
 ## 工作原理
 
@@ -76,7 +77,8 @@ Rust 服务负责认证、元数据、授权检查、文件系统边界与结果
 paru -S video-work-api-git
 sudo vwactl setup
 sudo vwactl init
-sudo vwactl model download   # 主动选择，约需 10 GB 网络流量与磁盘空间
+sudo vwactl model download                         # CosyVoice3 语音，约 10 GB
+sudo vwactl model download --kind translation      # MADLAD-400-3B，约 12 GB
 sudo systemctl start video-work-api.service
 ```
 
@@ -92,7 +94,8 @@ cd video-work-api
 cargo build --release
 ./scripts/vwactl setup
 ./scripts/vwactl init
-./scripts/vwactl model download   # 主动选择，约需 10 GB 网络流量与磁盘空间
+./scripts/vwactl model download                         # CosyVoice3 语音，约 10 GB
+./scripts/vwactl model download --kind translation      # MADLAD-400-3B，约 12 GB
 ./scripts/vwactl serve
 ```
 

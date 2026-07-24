@@ -52,8 +52,9 @@ with FunClip, and a browser studio—served by one authenticated Rust service.
 | Agent-assisted production | Let Codex or another MCP client list voices, generate speech, and extract subtitles |
 | Small-team voice libraries | Manage speakers and profiles in a bilingual, password-protected browser studio |
 
-This project is deliberately focused: it does not edit video, translate
-subtitles, perform FunClip stage-2 clipping, or make consent decisions for you.
+This project is deliberately focused: it does not perform FunClip stage-2
+clipping or make consent decisions for you. Machine translation of plain text
+and SRT is available via MADLAD-400-3B (`POST /api/translate`).
 
 ## How it works
 
@@ -79,7 +80,8 @@ builds the current Git revision and installs the service layout.
 paru -S video-work-api-git
 sudo vwactl setup
 sudo vwactl init
-sudo vwactl model download   # opt-in, roughly 10 GB network + disk
+sudo vwactl model download                         # CosyVoice3 voice, ~10 GB
+sudo vwactl model download --kind translation      # MADLAD-400-3B, ~12 GB
 sudo systemctl start video-work-api.service
 ```
 
@@ -95,7 +97,8 @@ cd video-work-api
 cargo build --release
 ./scripts/vwactl setup
 ./scripts/vwactl init
-./scripts/vwactl model download   # opt-in, roughly 10 GB network + disk
+./scripts/vwactl model download                         # CosyVoice3 voice, ~10 GB
+./scripts/vwactl model download --kind translation      # MADLAD-400-3B, ~12 GB
 ./scripts/vwactl serve
 ```
 

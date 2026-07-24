@@ -12,15 +12,17 @@ use video_work_api::config::{McpTokenSource, Settings};
 use video_work_api::database::{Database, NewRenderJob};
 use video_work_api::engine::FakeEngine;
 use video_work_api::http::{build_router, AppState, LoginLimiter};
-use video_work_api::model::ModelDownloadManager;
+use video_work_api::model::ModelDownloadRegistry;
 use video_work_api::passkeys::CeremonyStore;
 use video_work_api::studio::Studio;
 use video_work_api::subtitles::FakeSubtitles;
+use video_work_api::translation::FakeTranslationEngine;
 
 fn test_settings(root: &std::path::Path) -> Settings {
     Settings {
         data_dir: root.to_path_buf(),
         model_dir: root.join("model"),
+        translation_model_dir: root.join("translation-model"),
         cosyvoice_root: root.join("source"),
         setup_token_file: root.join("setup-token"),
         host: "127.0.0.1".into(),
@@ -36,6 +38,7 @@ fn test_settings(root: &std::path::Path) -> Settings {
         video_projects_dir: root.join("video-projects"),
         receipt_key_file: root.join("receipt.key"),
         subtitle_timeout_seconds: 30,
+        translation_timeout_seconds: 30,
         xry_task_root: root.join("xry-tasks"),
         xry_source_root: root.join("xry-sources"),
         xry_renderer: root.join("render_variants.py"),
@@ -112,12 +115,13 @@ async fn setup_login_and_status() {
         db,
         Arc::new(FakeEngine::new()),
         Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
     ));
     let app = build_router(AppState {
         studio: studio.clone(),
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     });
 
     let res = app
@@ -181,6 +185,11 @@ async fn setup_login_and_status() {
     assert_eq!(json["model_present"], true);
     assert_eq!(json["model_runtime_ready"], false);
     assert_eq!(json["model_ready"], false);
+    assert_eq!(json["translation"]["model"], "google/madlad400-3b-mt");
+    assert_eq!(json["models"]["voice"]["kind"], "voice");
+    assert_eq!(json["models"]["translation"]["kind"], "translation");
+    assert_eq!(json["models"]["translation"]["id"], "google/madlad400-3b-mt");
+    assert_eq!(json["limits"]["max_translate_segments"], 200);
 }
 
 #[tokio::test]
@@ -197,12 +206,13 @@ async fn passkey_management_requires_auth_and_login_start_handles_empty_store() 
         db,
         Arc::new(FakeEngine::new()),
         Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
     ));
     let app = build_router(AppState {
         studio: studio.clone(),
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     });
 
     let response = app
@@ -330,12 +340,13 @@ async fn mcp_requires_bearer() {
         db,
         Arc::new(FakeEngine::new()),
         Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
     ));
     let app = build_router(AppState {
         studio: studio.clone(),
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     });
 
     let res = app
@@ -391,12 +402,13 @@ async fn editor_rest_requires_same_origin_session_and_enforces_revisions() {
         db,
         Arc::new(FakeEngine::new()),
         Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
     ));
     let app = build_router(AppState {
         studio: Arc::clone(&studio),
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     });
     let create = serde_json::json!({
         "action": "create_project",
@@ -599,12 +611,13 @@ async fn editor_events_require_session_and_origin_and_emit_sanitized_changes() {
         db,
         Arc::new(FakeEngine::new()),
         Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
     ));
     let app = build_router(AppState {
         studio: Arc::clone(&studio),
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     });
     let create = serde_json::json!({
         "action": "create_project",
@@ -812,12 +825,13 @@ async fn editor_mcp_requires_bearer_and_dispatches_single_tool() {
         Database::open(settings.database_path()).unwrap(),
         Arc::new(FakeEngine::new()),
         Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
     ));
     let app = build_router(AppState {
         studio,
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     });
     let call = serde_json::json!({
         "jsonrpc": "2.0",
@@ -938,12 +952,13 @@ async fn mcp_token_requires_same_origin_admin_session_and_disables_caching() {
         db,
         Arc::new(FakeEngine::new()),
         Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
     ));
     let app = build_router(AppState {
         studio,
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     });
 
     let response = app
@@ -1060,12 +1075,13 @@ async fn mcp_token_endpoint_is_unavailable_when_not_configured() {
         db,
         Arc::new(FakeEngine::new()),
         Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
     ));
     let app = build_router(AppState {
         studio,
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     });
 
     let response = app
@@ -1100,12 +1116,13 @@ async fn rejects_cross_origin_mutations() {
         db,
         Arc::new(FakeEngine::new()),
         Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
     ));
     let app = build_router(AppState {
         studio,
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     });
 
     let res = app
@@ -1138,12 +1155,13 @@ async fn spoofed_forwarded_for_does_not_bypass_login_rate_limit() {
         db,
         Arc::new(FakeEngine::new()),
         Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
     ));
     let app = build_router(AppState {
         studio,
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     });
 
     for attempt in 0..9 {
@@ -1187,12 +1205,13 @@ async fn subtitle_upload_requires_auth_extracts_and_cleans_up() {
         db,
         Arc::new(FakeEngine::new()),
         Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
     ));
     let app = build_router(AppState {
         studio,
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     });
 
     let boundary = "vwa-test-boundary";
@@ -1298,4 +1317,115 @@ async fn subtitle_upload_requires_auth_extracts_and_cleans_up() {
         })
         .collect();
     assert!(leftovers.is_empty(), "upload temp files must be removed");
+}
+
+#[tokio::test]
+async fn translate_languages_and_text_prefer_english_russian() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("static")).unwrap();
+    fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
+    let settings = test_settings(root);
+    settings.create_data_dirs().unwrap();
+    let db = Database::open(settings.database_path()).unwrap();
+    db.set_admin(&video_work_api::security::hash_password("correct horse battery staple").unwrap())
+        .unwrap();
+    let studio = Arc::new(Studio::new(
+        settings,
+        db,
+        Arc::new(FakeEngine::new()),
+        Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
+    ));
+    let app = build_router(AppState {
+        studio,
+        limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
+    });
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"password":"correct horse battery staple"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let cookie = res
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/translate/languages")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let languages = body_json(res).await;
+    assert_eq!(languages["languages"][0]["code"], "en");
+    assert_eq!(languages["languages"][1]["code"], "ru");
+    assert_eq!(languages["model"], "google/madlad400-3b-mt");
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/translate")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"target_lang":"ru","text":"hello"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let translated = body_json(res).await;
+    assert_eq!(translated["target_lang"], "ru");
+    assert_eq!(translated["text"], "[ru] hello");
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/translate")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"target_lang":"en","srt":"1\n00:00:00,000 --> 00:00:01,000\n你好\n"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let srt_result = body_json(res).await;
+    assert_eq!(srt_result["segments"][0]["text"], "[en] 你好");
+    assert!(srt_result["srt"].as_str().unwrap().contains("[en] 你好"));
 }

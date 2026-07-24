@@ -33,7 +33,7 @@ pub fn tool_specs() -> Value {
     json!([
         {
             "name": "video_editor",
-            "description": "The sole Video Work API tool for speakers, consent-gated voices, speech/subtitles, virtual project editing, queued media work, gates, lifecycle, and exports.",
+            "description": "The sole Video Work API tool for speakers, consent-gated voices, speech/subtitles/translation, virtual project editing, queued media work, gates, lifecycle, and exports.",
             "inputSchema": {
                 "oneOf": [
                     action_schema("get_status", json!({}), &[]),
@@ -99,6 +99,36 @@ pub fn tool_specs() -> Value {
                         "extract_video_subtitles",
                         json!({ "video_path": { "type": "string" } }),
                         &["video_path"]
+                    ),
+                    action_schema("list_translation_languages", json!({}), &[]),
+                    action_schema(
+                        "translate",
+                        json!({
+                            "target_lang": {
+                                "type": "string",
+                                "description": "ISO 639 target language code. English (en) and Russian (ru) are listed first in list_translation_languages."
+                            },
+                            "text": { "type": "string" },
+                            "texts": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "srt": { "type": "string" },
+                            "segments": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "index": { "type": "integer" },
+                                        "start": { "type": "string" },
+                                        "end": { "type": "string" },
+                                        "text": { "type": "string" }
+                                    },
+                                    "required": ["start", "end", "text"]
+                                }
+                            }
+                        }),
+                        &["target_lang"]
                     ),
                     action_schema("list_projects", json!({}), &[]),
                     action_schema(
@@ -440,6 +470,8 @@ mod tests {
                 "generate_speech",
                 "get_generation",
                 "extract_video_subtitles",
+                "list_translation_languages",
+                "translate",
                 "list_projects",
                 "create_project",
                 "get_tree",

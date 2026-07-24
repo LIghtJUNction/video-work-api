@@ -10,9 +10,15 @@ use crate::audio::{self, convert_reference, validate_generated_wav, MAX_UPLOAD_B
 use crate::config::Settings;
 use crate::database::Database;
 use crate::engine::SpeechEngine;
-use crate::model::model_files_present;
+use crate::model::{
+    model_files_present, model_kind_files_present, translation_model_files_present, ModelKind,
+};
 use crate::paths::{resolve_under_root, safe_owned_file};
-use crate::subtitles::SubtitleExtractor;
+use crate::subtitles::{SubtitleExtractor, SubtitleSegment};
+use crate::translation::{
+    self, languages_payload, TranslationEngine, MAX_TRANSLATE_SEGMENTS, MAX_TRANSLATE_TEXT_CHARS,
+    MAX_TRANSLATE_TOTAL_CHARS,
+};
 use crate::{MAX_TEXT_LENGTH, PRODUCT};
 
 pub struct Studio {
@@ -20,6 +26,7 @@ pub struct Studio {
     pub database: Database,
     pub engine: Arc<dyn SpeechEngine>,
     pub subtitles: Arc<dyn SubtitleExtractor>,
+    pub translation: Arc<dyn TranslationEngine>,
 }
 
 impl Studio {
@@ -28,12 +35,14 @@ impl Studio {
         database: Database,
         engine: Arc<dyn SpeechEngine>,
         subtitles: Arc<dyn SubtitleExtractor>,
+        translation: Arc<dyn TranslationEngine>,
     ) -> Self {
         Self {
             settings,
             database,
             engine,
             subtitles,
+            translation,
         }
     }
 
@@ -45,6 +54,10 @@ impl Studio {
         // once in this process" (lazy warm). Keep that meaning, and expose
         // clearer readiness fields for the UI.
         let model_warm = self.engine.loaded();
+        let translation_present = translation_model_files_present(&self.settings);
+        let translation_ready = self.translation.ready();
+        let translation_loaded = self.translation.loaded();
+        let voice_ready = model_present && runtime_ready;
         let (render_queued, render_running) = self.database.render_job_counts()?;
         let project_count = self.database.list_video_projects()?.len();
         Ok(json!({
@@ -54,11 +67,42 @@ impl Studio {
             "configured": self.database.configured()?,
             "authenticated": authenticated,
             "passkey_login_available": self.database.count_passkeys()? > 0,
+            // Legacy top-level voice fields (unchanged contract).
             "model_present": model_present,
             "model_runtime_ready": runtime_ready,
-            "model_ready": model_present && runtime_ready,
+            "model_ready": voice_ready,
             // Warm after first successful generation in this process.
             "model_loaded": model_warm,
+            // Parallel multi-model view: same fields for every kind.
+            "models": {
+                "voice": {
+                    "kind": ModelKind::Voice.as_str(),
+                    "id": ModelKind::Voice.hub_id(),
+                    "present": model_present,
+                    "runtime_ready": runtime_ready,
+                    "ready": voice_ready,
+                    "loaded": model_warm,
+                    "download_path": ModelKind::Voice.download_path(),
+                },
+                "translation": {
+                    "kind": ModelKind::Translation.as_str(),
+                    "id": ModelKind::Translation.hub_id(),
+                    "present": translation_present,
+                    "runtime_ready": runtime_ready,
+                    "ready": translation_ready,
+                    "loaded": translation_loaded,
+                    "download_path": ModelKind::Translation.download_path(),
+                },
+            },
+            "translation": {
+                "model": ModelKind::Translation.hub_id(),
+                "present": translation_present,
+                "ready": translation_ready,
+                "loaded": translation_loaded,
+                "path": "/api/translate",
+                "languages_path": "/api/translate/languages",
+                "download_path": ModelKind::Translation.download_path(),
+            },
             "mcp": {
                 "path": "/mcp",
                 "configured": self.settings.mcp_token.is_some(),
@@ -82,8 +126,48 @@ impl Studio {
                 "min_speed": 0.75,
                 "max_speed": 1.25,
                 "max_upload_bytes": MAX_UPLOAD_BYTES,
+                "max_translate_text_chars": MAX_TRANSLATE_TEXT_CHARS,
+                "max_translate_segments": MAX_TRANSLATE_SEGMENTS,
+                "max_translate_total_chars": MAX_TRANSLATE_TOTAL_CHARS,
             },
         }))
+    }
+
+    pub fn list_translation_languages(&self) -> Value {
+        let mut payload = languages_payload();
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("ready".into(), json!(self.translation.ready()));
+            obj.insert(
+                "present".into(),
+                json!(model_kind_files_present(
+                    &self.settings,
+                    ModelKind::Translation
+                )),
+            );
+            obj.insert(
+                "download_path".into(),
+                json!(ModelKind::Translation.download_path()),
+            );
+        }
+        payload
+    }
+
+    pub fn translate(
+        &self,
+        target_lang: &str,
+        text: Option<&str>,
+        texts: Option<&[String]>,
+        srt: Option<&str>,
+        segments: Option<&[SubtitleSegment]>,
+    ) -> Result<Value> {
+        translation::translate_request(
+            self.translation.as_ref(),
+            target_lang,
+            text,
+            texts,
+            srt,
+            segments,
+        )
     }
 
     pub fn list_speakers(&self) -> Result<Value> {

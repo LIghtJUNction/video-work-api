@@ -123,8 +123,30 @@
           <div id="subtitleJobs" class="job-list"></div>
         </div>
       </section>
+      <section class="card translate">
+        <div class="section-heading"><div><p class="eyebrow" data-i18n="translateEyebrow">TRANSLATE</p><h2 data-i18n="translateTitle">多语言翻译</h2><p class="section-lead" data-i18n="translateLead">使用 MADLAD-400-3B 翻译纯文本或 SRT 字幕；英文与俄语排在语言列表前两位。</p></div><span class="section-number">03</span></div>
+        <form id="translateForm">
+          <label><span data-i18n="targetLang">目标语言</span>
+            <select id="targetLang" name="target_lang" required>
+              <option value="en">English / 英语</option>
+              <option value="ru">Russian / 俄语</option>
+            </select>
+          </label>
+          <label class="grow"><span data-i18n="translateText">文本或 SRT</span><textarea id="translateInput" name="text" rows="8" placeholder="Hello world&#10;&#10;或粘贴完整 SRT…" aria-describedby="translateError"></textarea></label>
+          <div class="batch-toolbar"><span id="translateStatus" class="batch-count"></span><span id="translateError" class="field-error" role="alert"></span></div>
+          <div class="inline-actions">
+            <button id="translateButton" type="submit" data-i18n="runTranslate">翻译</button>
+            <button id="downloadTranslationModel" type="button" class="secondary hidden" data-i18n="downloadTranslationModel">下载翻译模型</button>
+            <button id="downloadTranslatedSrt" type="button" class="secondary hidden" data-i18n="downloadSrt">下载 SRT</button>
+          </div>
+        </form>
+        <p class="hint" data-i18n="translateHint">首次使用需下载约 12 GB 的 MADLAD-400-3B 权重。可翻译纯文本；若内容像 SRT 会保留时间轴。</p>
+        <div id="translateResult" class="batch-results hidden">
+          <pre id="translateOutput" class="result-pre"></pre>
+        </div>
+      </section>
       <section class="card passkeys">
-        <div class="section-heading"><div><p class="eyebrow">PASSKEYS</p><h2 data-i18n="passkeysTitle">Passkey 管理</h2><p class="section-lead" data-i18n="passkeysLead">添加本机或安全密钥，下次可免输密码登录。</p></div><span class="section-number">03</span></div>
+        <div class="section-heading"><div><p class="eyebrow">PASSKEYS</p><h2 data-i18n="passkeysTitle">Passkey 管理</h2><p class="section-lead" data-i18n="passkeysLead">添加本机或安全密钥，下次可免输密码登录。</p></div><span class="section-number">04</span></div>
         <p id="passkeySupport" class="hint hidden"></p>
         <form id="passkeyForm" class="inline"><label class="grow"><span data-i18n="passkeyName">设备名称</span><input name="name" maxlength="100" required placeholder="MacBook Touch ID"></label><button data-i18n="addPasskey">添加 Passkey</button></form>
         <div id="passkeyList" class="passkey-list"></div>
@@ -164,6 +186,6 @@
   </template>
   <script src="/static/batch-core.js?v=20260722e"></script>
   <script src="/static/agent-prompt.js?v=20260722-1"></script>
-  <script src="/static/app.js?v=20260722g"></script>
+  <script src="/static/app.js?v=20260724-translate"></script>
 </body>
 </html>

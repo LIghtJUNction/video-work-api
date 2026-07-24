@@ -19,10 +19,14 @@ use video_work_api::database::Database;
 use video_work_api::engine::{CosyVoiceEngine, SpeechEngine};
 use video_work_api::http::{build_router, AppState, LoginLimiter};
 use video_work_api::importer::import_folder;
-use video_work_api::model::{download_model, model_files_present, ModelDownloadManager};
+use video_work_api::model::{
+    download_model_kind, model_files_present, model_kind_files_present, ModelDownloadRegistry,
+    ModelKind,
+};
 use video_work_api::passkeys::CeremonyStore;
 use video_work_api::studio::Studio;
 use video_work_api::subtitles::{FunClipExtractor, SubtitleExtractor};
+use video_work_api::translation::{MadladEngine, TranslationEngine};
 
 #[derive(Parser, Debug)]
 #[command(name = "vwactl", version, about = "Video Work API control")]
@@ -57,7 +61,7 @@ enum Commands {
     },
     /// Create Python venv for CosyVoice/FunClip vendor dependencies
     Setup,
-    /// Model operations
+    /// Model operations (voice clone or translation weights)
     Model {
         #[command(subcommand)]
         command: ModelCommands,
@@ -80,8 +84,14 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 enum ModelCommands {
-    /// Download the pinned CosyVoice3 snapshot
-    Download,
+    /// Download pinned model weights (voice CosyVoice by default)
+    Download {
+        /// Model kind: `voice` (CosyVoice3) or `translation` (MADLAD-400-3B)
+        #[arg(long, default_value = "voice")]
+        kind: String,
+    },
+    /// Alias for `model download --kind translation`
+    DownloadTranslation,
 }
 
 #[derive(Subcommand, Debug)]
@@ -131,10 +141,28 @@ async fn main() -> Result<()> {
         },
         Commands::Setup => cmd_setup(&settings),
         Commands::Model {
-            command: ModelCommands::Download,
+            command: ModelCommands::Download { kind },
         } => {
-            download_model(&settings)?;
-            println!("Model directory: {}", settings.model_dir.display());
+            let kind = ModelKind::parse(&kind)?;
+            download_model_kind(&settings, kind)?;
+            println!(
+                "{} model directory: {}",
+                kind.as_str(),
+                match kind {
+                    ModelKind::Voice => settings.model_dir.display(),
+                    ModelKind::Translation => settings.translation_model_dir.display(),
+                }
+            );
+            Ok(())
+        }
+        Commands::Model {
+            command: ModelCommands::DownloadTranslation,
+        } => {
+            download_model_kind(&settings, ModelKind::Translation)?;
+            println!(
+                "translation model directory: {}",
+                settings.translation_model_dir.display()
+            );
             Ok(())
         }
         Commands::Import {
@@ -557,6 +585,19 @@ fn cmd_status(settings: &mut Settings) -> Result<()> {
             "missing"
         }
     );
+    let translation_present = model_kind_files_present(settings, ModelKind::Translation);
+    println!(
+        "translation_model: {}",
+        if translation_present { "present" } else { "missing" }
+    );
+    println!(
+        "translation_ready: {}",
+        if translation_present && python_runtime_ready(settings) {
+            "yes"
+        } else {
+            "no"
+        }
+    );
     println!(
         "mcp: {}",
         settings
@@ -602,6 +643,10 @@ fn cmd_paths(settings: &mut Settings) -> Result<()> {
             settings.reference_input_dir.display().to_string(),
         ),
         ("model", settings.model_dir.display().to_string()),
+        (
+            "translation_model",
+            settings.translation_model_dir.display().to_string(),
+        ),
         ("cosyvoice", settings.cosyvoice_root.display().to_string()),
         (
             "funclip",
@@ -690,9 +735,20 @@ async fn cmd_serve(mut settings: Settings) -> Result<()> {
         settings.subtitle_timeout_seconds,
         cancellation.clone(),
     ));
+    let translation: Arc<dyn TranslationEngine> = Arc::new(MadladEngine::new(
+        settings.translation_model_dir.clone(),
+        &settings.project_root,
+        settings.translation_timeout_seconds,
+    ));
     let host = settings.host.clone();
     let port = settings.port;
-    let studio = Arc::new(Studio::new(settings, database, engine, subtitles));
+    let studio = Arc::new(Studio::new(
+        settings,
+        database,
+        engine,
+        subtitles,
+        translation,
+    ));
     let render_worker = video_work_api::render_queue::start_worker(studio.clone())
         .context("start exclusive render queue worker")?;
     let render_shutdown = render_worker.shutdown_notifier();
@@ -700,7 +756,7 @@ async fn cmd_serve(mut settings: Settings) -> Result<()> {
         studio,
         limiter: Arc::new(LoginLimiter::new()),
         passkey_ceremonies: Arc::new(CeremonyStore::new()),
-        model_download: Arc::new(ModelDownloadManager::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
     };
     let app = build_router(state);
     let addr = format!("{host}:{port}");
