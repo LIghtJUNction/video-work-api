@@ -73,12 +73,9 @@ header, main { width: min(1180px, 100%); margin: auto; padding-inline: 28px; }
 .brand-mark {
   width: 34px; height: 34px;
   display: grid; place-items: center;
-  border: 1.5px solid var(--ink);
-  border-radius: 46% 54% 50% 50% / 52% 48% 52% 48%; /* hand-drawn wobble */
-  color: var(--ink);
-  background: var(--surface-tint);
+  flex: 0 0 auto;
 }
-.brand-mark svg { width: 20px; height: 20px; }
+.brand-mark svg { width: 100%; height: 100%; display: block; }
 .header-actions, .inline, .record-controls { display: flex; align-items: center; gap: 10px; }
 
 .eyebrow, .endpoint-label, .result-label {
