@@ -1,9 +1,9 @@
 const translations = {
   zh: {
     title: "视频工作 API",
-    workspaceEyebrow: "VOICE WORKSPACE",
-    workspaceTitle: "把声音，变成可复用的创作资产。",
-    workspaceLead: "导入有明确授权的参考音频，保存精确逐字稿，然后生成自然、稳定的语音。",
+    workspaceEyebrow: "VIDEO WORKSPACE",
+    workspaceTitle: "让声音、字幕与视频创作，汇成可复用的工作流。",
+    workspaceLead: "批量转写录音，提取并翻译字幕，生成自然语音，再完成视频创作与交付。",
     endpointLabel: "MCP SERVER",
     mcpHint: "MCP 服务器运行在此端点，使用 Bearer Token 认证。",
     copyAgentPrompt: "复制 Agent 提示词",
@@ -23,6 +23,7 @@ const translations = {
     finishSetup: "完成设置",
     loginTitle: "管理员登录",
     login: "登录",
+    loginSessionHint: "登录后，此设备将保持登录 30 天；退出或重置密码会立即失效。",
     or: "或",
     passkeyLogin: "使用 Passkey 登录",
     passkeysTitle: "Passkey 管理",
@@ -107,6 +108,22 @@ const translations = {
     downloadSrt: "下载 SRT",
     subtitlesEmpty: "未识别到字幕片段。",
     subtitlePreview: "字幕片段预览",
+    audioTranscriptionEyebrow: "TRANSCRIBE",
+    audioTranscriptionTitle: "录音转文字",
+    audioTranscriptionLead: "批量上传录音文件，用 FunClip stage-1 FunASR Paraformer 获取可复制文本和时间码。",
+    audioTranscriptionUpload: "录音文件（WAV、MP3、AAC、M4A、FLAC；最多 50 个）",
+    chooseAudio: "选择录音文件",
+    audioTranscriptionNoFile: "未选择录音文件",
+    audioTranscriptionFilesChosen: "已选 {count} 个：{names}",
+    audioTranscriptionItemCount: "共 {count} 个录音",
+    audioTranscriptionRequired: "请选择 WAV、MP3、AAC、M4A 或 FLAC 录音文件。",
+    audioTranscriptionUnsupported: "仅支持 WAV、MP3、AAC、M4A 或 FLAC 录音文件。",
+    transcribeAudioItems: "转写 {count} 个录音",
+    transcribingAudio: "正在转写…",
+    audioTranscriptionHint: "使用现有 FunClip stage-1 FunASR Paraformer；浏览器逐个上传并转写，不会进行第二次转写。",
+    transcriptionText: "识别文本",
+    transcriptionSegments: "时间码片段（{count}）",
+    audioTranscriptionBatchReady: "录音批量转写完成",
     translateEyebrow: "TRANSLATE",
     translateTitle: "多语言翻译",
     translateLead: "使用 MADLAD-400-3B 翻译纯文本或 SRT；英文与俄语排在语言列表前两位。",
@@ -126,9 +143,9 @@ const translations = {
   },
   en: {
     title: "Video Work API",
-    workspaceEyebrow: "VOICE WORKSPACE",
-    workspaceTitle: "Turn every voice into a reusable creative asset.",
-    workspaceLead: "Import an explicitly authorized reference, keep its exact transcript, and generate natural, consistent speech.",
+    workspaceEyebrow: "VIDEO WORKSPACE",
+    workspaceTitle: "Turn audio, captions, and video creation into reusable workflows.",
+    workspaceLead: "Transcribe recordings in batches, extract and translate captions, generate natural speech, then finish video creation and delivery.",
     endpointLabel: "MCP SERVER",
     mcpHint: "The MCP server runs at this endpoint with Bearer Token authentication.",
     copyAgentPrompt: "Copy agent prompt",
@@ -148,6 +165,7 @@ const translations = {
     finishSetup: "Complete setup",
     loginTitle: "Admin sign in",
     login: "Sign in",
+    loginSessionHint: "This device stays signed in for 30 days. Sign out or a password reset invalidates it immediately.",
     or: "or",
     passkeyLogin: "Sign in with a passkey",
     passkeysTitle: "Passkeys",
@@ -233,6 +251,22 @@ const translations = {
     downloadSrt: "Download SRT",
     subtitlesEmpty: "No subtitle segments detected.",
     subtitlePreview: "Subtitle segment preview",
+    audioTranscriptionEyebrow: "TRANSCRIBE",
+    audioTranscriptionTitle: "Recording to Text",
+    audioTranscriptionLead: "Batch-upload recordings and get copyable text with time codes from FunClip stage-1 FunASR Paraformer.",
+    audioTranscriptionUpload: "Recording files (WAV, MP3, AAC, M4A, FLAC; up to 50)",
+    chooseAudio: "Choose recording",
+    audioTranscriptionNoFile: "No recording selected",
+    audioTranscriptionFilesChosen: "{count} selected: {names}",
+    audioTranscriptionItemCount: "{count} recording(s)",
+    audioTranscriptionRequired: "Choose a WAV, MP3, AAC, M4A, or FLAC recording.",
+    audioTranscriptionUnsupported: "Only WAV, MP3, AAC, M4A, and FLAC recordings are supported.",
+    transcribeAudioItems: "Transcribe {count} recording(s)",
+    transcribingAudio: "Transcribing…",
+    audioTranscriptionHint: "Uses the existing FunClip stage-1 FunASR Paraformer; the browser uploads and transcribes one file at a time, with no second transcription.",
+    transcriptionText: "Recognized text",
+    transcriptionSegments: "Time-coded segments ({count})",
+    audioTranscriptionBatchReady: "Recording batch transcription complete",
     translateEyebrow: "TRANSLATE",
     translateTitle: "Translate",
     translateLead: "Translate plain text or SRT with MADLAD-400-3B. English and Russian are listed first.",
@@ -285,10 +319,14 @@ const liveStreams = new Set();
 let modelDownloadPoll = null;
 let generationRunning = false;
 let subtitleRunning = false;
+let audioTranscriptionRunning = false;
 let generationJobs = [];
 let subtitleJobs = [];
+let audioTranscriptionJobs = [];
 let generationEpoch = 0;
 let subtitleEpoch = 0;
+let audioTranscriptionEpoch = 0;
+let audioTranscriptionControlsDisabled = false;
 let logoutInProgress = false;
 
 const {
@@ -382,8 +420,10 @@ function translate() {
   }
   syncGenerationInput();
   syncSubtitleInput();
+  syncAudioTranscriptionInput();
   localizeGenerationJobsInPlace();
   localizeSubtitleJobsInPlace();
+  renderAudioTranscriptionJobs();
 }
 
 function notice(message) {
@@ -1289,6 +1329,7 @@ if (speed && speedValue) {
 const MAX_BATCH_ITEMS = 50;
 const MAX_GENERATION_CHARS = 1200;
 const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
+const AUDIO_TRANSCRIPTION_EXTENSIONS = new Set(["wav", "mp3", "aac", "m4a", "flac"]);
 
 function revokeSubtitleUrls(jobs = subtitleJobs) {
   jobs.forEach((job) => {
@@ -1302,6 +1343,7 @@ function clearBatchState(unlock = true) {
   generationEpoch += 1;
   subtitleEpoch += 1;
   revokeSubtitleUrls();
+  resetAudioTranscriptionBatch(unlock);
   generationJobs = [];
   subtitleJobs = [];
   generationRunning = false;
@@ -1356,11 +1398,20 @@ function batchCounts(jobs) {
 }
 
 function updateBatchProgress(kind, jobs) {
-  const prefix = kind === "generation" ? "generation" : "subtitle";
+  const control = {
+    generation: { prefix: "generation", retryId: "retryGenerationFailures" },
+    subtitle: { prefix: "subtitle", retryId: "retrySubtitleFailures" },
+    audioTranscription: {
+      prefix: "audioTranscription",
+      retryId: "retryAudioTranscriptionFailures",
+    },
+  }[kind];
+  if (!control) return;
+  const { prefix, retryId } = control;
   const box = $(`#${prefix}Batch`);
   const progress = $(`#${prefix}Progress`);
   const text = $(`#${prefix}ProgressText`);
-  const retry = $(`#retry${kind === "generation" ? "Generation" : "Subtitle"}Failures`);
+  const retry = $(`#${retryId}`);
   if (!box || !progress || !text || !retry) return;
   box.classList.toggle("hidden", jobs.length === 0);
   const counts = batchCounts(jobs);
@@ -1808,6 +1859,269 @@ if (retrySubtitleFailures) {
   retrySubtitleFailures.onclick = () => runSubtitleJobs(subtitleJobs.filter((job) => job.status === "failed"));
 }
 
+const audioTranscriptionFile = $("#audioTranscriptionFile");
+const audioTranscriptionFileButton = $("#audioTranscriptionFileButton");
+const audioTranscriptionFileName = $("#audioTranscriptionFileName");
+const audioTranscriptionFileClear = $("#audioTranscriptionFileClear");
+
+function selectedAudioTranscriptionFiles() {
+  return Array.from(audioTranscriptionFile?.files || []);
+}
+
+function audioTranscriptionValidation(files = selectedAudioTranscriptionFiles()) {
+  if (!files.length) return t("audioTranscriptionRequired");
+  if (files.length > MAX_BATCH_ITEMS) return t("tooManyItems");
+  const unsupported = files.find((file) => {
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    return !AUDIO_TRANSCRIPTION_EXTENSIONS.has(extension);
+  });
+  if (unsupported) {
+    return t("audioTranscriptionUnsupported");
+  }
+  return "";
+}
+
+function syncAudioTranscriptionInput() {
+  const files = selectedAudioTranscriptionFiles();
+  const error = audioTranscriptionValidation(files);
+  const errorNode = $("#audioTranscriptionError");
+  const count = $("#audioTranscriptionCount");
+  const button = $("#audioTranscriptionButton");
+  const names = files.slice(0, 3).map((file) => file.name).join(", ");
+  if (audioTranscriptionFileName) {
+    audioTranscriptionFileName.textContent = files.length
+      ? tf("audioTranscriptionFilesChosen", {
+          count: files.length,
+          names: `${names}${files.length > 3 ? "…" : ""}`,
+        })
+      : t("audioTranscriptionNoFile");
+    audioTranscriptionFileName.classList.toggle("has-file", files.length > 0);
+  }
+  if (audioTranscriptionFileClear) {
+    audioTranscriptionFileClear.classList.toggle("hidden", files.length === 0);
+  }
+  if (count) count.textContent = tf("audioTranscriptionItemCount", { count: files.length });
+  if (audioTranscriptionFile) {
+    audioTranscriptionFile.setAttribute("aria-invalid", String(Boolean(error)));
+  }
+  if (errorNode) errorNode.textContent = error;
+  if (button) {
+    button.disabled = audioTranscriptionControlsDisabled || Boolean(error);
+    button.textContent = audioTranscriptionRunning
+      ? t("transcribingAudio")
+      : tf("transcribeAudioItems", { count: files.length });
+  }
+}
+
+function setAudioTranscriptionControlsDisabled(disabled) {
+  audioTranscriptionControlsDisabled = disabled;
+  [
+    audioTranscriptionFile,
+    audioTranscriptionFileButton,
+    audioTranscriptionFileClear,
+    $("#audioTranscriptionButton"),
+  ].forEach((node) => {
+    if (node) node.disabled = disabled;
+  });
+  document.querySelectorAll("#audioTranscriptionJobs .retry-item").forEach((node) => {
+    node.disabled = disabled;
+  });
+}
+
+function setAudioTranscriptionLocked(locked) {
+  audioTranscriptionRunning = locked;
+  setAudioTranscriptionControlsDisabled(locked);
+}
+
+function revokeAudioTranscriptionUrls(jobs = audioTranscriptionJobs) {
+  jobs.forEach((job) => {
+    if (!job.downloadUrl) return;
+    URL.revokeObjectURL(job.downloadUrl);
+    job.downloadUrl = "";
+  });
+}
+
+function resetAudioTranscriptionBatch(unlock = true) {
+  audioTranscriptionEpoch += 1;
+  revokeAudioTranscriptionUrls();
+  audioTranscriptionJobs = [];
+  audioTranscriptionRunning = false;
+  setAudioTranscriptionControlsDisabled(!unlock);
+  $("#audioTranscriptionJobs")?.replaceChildren();
+  updateBatchProgress("audioTranscription", audioTranscriptionJobs);
+  syncAudioTranscriptionInput();
+}
+
+function updateAudioTranscriptionJob(job) {
+  if (!job.row) return;
+  job.row.className = `job-row status-${job.status}`;
+  job.statusNode.textContent = statusText(job.status);
+  job.content.replaceChildren();
+  if (job.status === "complete") {
+    job.content.className = "job-content subtitle-output";
+    const textLabel = document.createElement("p");
+    textLabel.className = "eyebrow";
+    textLabel.textContent = t("transcriptionText");
+    const output = document.createElement("pre");
+    output.className = "result-pre";
+    output.textContent = job.result?.text || "";
+    job.content.append(textLabel, output);
+    if (job.result?.srt) {
+      if (!job.downloadUrl) {
+        job.downloadUrl = URL.createObjectURL(
+          new Blob([job.result.srt], { type: "application/x-subrip" }),
+        );
+      }
+      const actions = document.createElement("div");
+      actions.className = "inline-actions";
+      const download = document.createElement("a");
+      download.className = "button secondary compact";
+      download.href = job.downloadUrl;
+      download.download = subtitleDownloadName(job.label);
+      download.textContent = t("downloadSrt");
+      actions.appendChild(download);
+      job.content.appendChild(actions);
+    }
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = tf("transcriptionSegments", {
+      count: job.result?.segments?.length || 0,
+    });
+    details.appendChild(summary);
+    details.addEventListener("toggle", () => {
+      if (!details.open || details.dataset.materialized) return;
+      const segments = document.createElement("div");
+      segments.className = "segments";
+      appendSegments(
+        segments,
+        Array.isArray(job.result?.segments) ? job.result.segments : [],
+      );
+      details.appendChild(segments);
+      details.dataset.materialized = "true";
+    });
+    job.content.appendChild(details);
+  } else if (job.status === "failed") {
+    job.content.className = "job-content";
+    const error = document.createElement("p");
+    error.className = "job-error";
+    error.textContent = job.error || t("failed");
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "secondary compact retry-item";
+    retry.textContent = t("retryItem");
+    retry.disabled = audioTranscriptionRunning;
+    retry.onclick = () => runAudioTranscriptionJobs([job]);
+    job.content.append(error, retry);
+  }
+  updateBatchProgress("audioTranscription", audioTranscriptionJobs);
+}
+
+function renderAudioTranscriptionJobs() {
+  const root = $("#audioTranscriptionJobs");
+  if (!root) return;
+  root.replaceChildren();
+  audioTranscriptionJobs.forEach((job, index) => {
+    const row = document.createElement("article");
+    const head = document.createElement("div");
+    head.className = "job-head";
+    const title = document.createElement("strong");
+    title.textContent = `#${index + 1} · ${shortPreview(job.label)}`;
+    title.title = job.label;
+    const badge = document.createElement("span");
+    badge.className = "job-status";
+    head.append(title, badge);
+    const content = document.createElement("div");
+    row.append(head, content);
+    job.row = row;
+    job.statusNode = badge;
+    job.content = content;
+    root.appendChild(row);
+    updateAudioTranscriptionJob(job);
+  });
+  updateBatchProgress("audioTranscription", audioTranscriptionJobs);
+}
+
+async function runAudioTranscriptionJobs(jobs) {
+  if (audioTranscriptionRunning || logoutInProgress || !jobs.length) return;
+  const epoch = audioTranscriptionEpoch;
+  setAudioTranscriptionLocked(true);
+  jobs.forEach((job) => {
+    if (job.downloadUrl) URL.revokeObjectURL(job.downloadUrl);
+    job.downloadUrl = "";
+    job.status = "pending";
+    job.error = "";
+    job.result = null;
+    updateAudioTranscriptionJob(job);
+  });
+  try {
+    await runSequential(
+      jobs,
+      async (job) => {
+        const body = new FormData();
+        body.append("audio", job.file);
+        return api("/api/audio/transcriptions/upload", {
+          method: "POST",
+          body,
+        });
+      },
+      updateAudioTranscriptionJob,
+      () => epoch !== audioTranscriptionEpoch,
+    );
+    if (epoch !== audioTranscriptionEpoch) return;
+    notice(t("audioTranscriptionBatchReady"));
+  } finally {
+    if (epoch === audioTranscriptionEpoch) {
+      setAudioTranscriptionLocked(false);
+      syncAudioTranscriptionInput();
+      updateBatchProgress("audioTranscription", audioTranscriptionJobs);
+    }
+  }
+}
+
+async function startAudioTranscription() {
+  if (audioTranscriptionRunning || logoutInProgress) return;
+  const files = selectedAudioTranscriptionFiles();
+  const validation = audioTranscriptionValidation(files);
+  syncAudioTranscriptionInput();
+  if (validation) return;
+  resetAudioTranscriptionBatch();
+  audioTranscriptionJobs = files.map((file) => ({
+    file,
+    label: file.name,
+    status: "pending",
+    error: "",
+    result: null,
+    downloadUrl: "",
+  }));
+  renderAudioTranscriptionJobs();
+  notice("");
+  await runAudioTranscriptionJobs(audioTranscriptionJobs);
+}
+
+if (audioTranscriptionFile && audioTranscriptionFileButton && audioTranscriptionFileClear) {
+  audioTranscriptionFileButton.addEventListener("click", () => audioTranscriptionFile.click());
+  audioTranscriptionFile.addEventListener("change", syncAudioTranscriptionInput);
+  audioTranscriptionFileClear.addEventListener("click", () => {
+    audioTranscriptionFile.value = "";
+    resetAudioTranscriptionBatch();
+  });
+}
+const audioTranscriptionForm = $("#audioTranscriptionForm");
+if (audioTranscriptionForm) {
+  audioTranscriptionForm.onsubmit = async (event) => {
+    event.preventDefault();
+    await startAudioTranscription();
+  };
+}
+
+const retryAudioTranscriptionFailures = $("#retryAudioTranscriptionFailures");
+if (retryAudioTranscriptionFailures) {
+  retryAudioTranscriptionFailures.onclick = () =>
+    runAudioTranscriptionJobs(
+      audioTranscriptionJobs.filter((job) => job.status === "failed"),
+    );
+}
+
 let translationDownloadPoll = null;
 let lastTranslatedSrt = "";
 let translationLanguagesLoaded = false;
@@ -2095,16 +2409,20 @@ if (copyAgentPromptButton) {
 
 boot();
 window.addEventListener("beforeunload", (event) => {
-  if (generationRunning || subtitleRunning) {
+  if (generationRunning || subtitleRunning || audioTranscriptionRunning) {
     event.preventDefault();
     event.returnValue = "";
   }
 });
 window.addEventListener("pagehide", (event) => {
+  revokeAudioTranscriptionUrls();
   if (event.persisted) return;
   stopModelDownloadPolling();
   liveStreams.forEach(stopStream);
   revokeSubtitleUrls();
+});
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) renderAudioTranscriptionJobs();
 });
 
 const studioLayout = document.querySelector(".studio");

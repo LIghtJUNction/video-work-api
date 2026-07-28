@@ -75,6 +75,9 @@ pub enum VideoEditorRequest {
     ExtractVideoSubtitles {
         video_path: String,
     },
+    TranscribeAudio {
+        audio_path: String,
+    },
     ListTranslationLanguages {},
     Translate {
         target_lang: String,
@@ -261,6 +264,9 @@ pub fn execute(studio: &Studio, request: VideoEditorRequest) -> Result<Value, Ed
             .map_err(map_studio_editor),
         VideoEditorRequest::ExtractVideoSubtitles { video_path } => studio
             .extract_subtitles(&video_path)
+            .map_err(map_studio_editor),
+        VideoEditorRequest::TranscribeAudio { audio_path } => studio
+            .transcribe_audio(&audio_path)
             .map_err(map_studio_editor),
         VideoEditorRequest::ListTranslationLanguages {} => {
             Ok(studio.list_translation_languages())
@@ -1672,7 +1678,7 @@ mod tests {
         let settings = Settings {
             data_dir: root.to_path_buf(),
             model_dir: root.join("model"),
-        translation_model_dir: root.join("translation-model"),
+            translation_model_dir: root.join("translation-model"),
             cosyvoice_root: root.join("source"),
             setup_token_file: root.join("setup-token"),
             host: "127.0.0.1".into(),
@@ -1684,11 +1690,12 @@ mod tests {
             mcp_token_source: None,
             funclip_root: None,
             video_input_dir: root.join("videos"),
+            audio_input_dir: root.join("audio"),
             reference_input_dir: root.join("references"),
             video_projects_dir: root.join("video-projects"),
             receipt_key_file: root.join("receipt.key"),
             subtitle_timeout_seconds: 30,
-        translation_timeout_seconds: 30,
+            translation_timeout_seconds: 30,
             xry_task_root: root.join("xry-tasks"),
             xry_source_root: root.join("xry-sources"),
             xry_renderer: root.join("render.py"),

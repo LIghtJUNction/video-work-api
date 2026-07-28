@@ -638,6 +638,7 @@ fn cmd_paths(settings: &mut Settings) -> Result<()> {
             settings.generations_dir().display().to_string(),
         ),
         ("videos", settings.video_input_dir.display().to_string()),
+        ("audio", settings.audio_input_dir.display().to_string()),
         (
             "references",
             settings.reference_input_dir.display().to_string(),

@@ -22,6 +22,8 @@ pub struct Settings {
     pub mcp_token_source: Option<McpTokenSource>,
     pub funclip_root: Option<PathBuf>,
     pub video_input_dir: PathBuf,
+    /// Private recording input for FunASR transcription requests.
+    pub audio_input_dir: PathBuf,
     pub reference_input_dir: PathBuf,
     pub video_projects_dir: PathBuf,
     pub receipt_key_file: PathBuf,
@@ -85,6 +87,7 @@ impl Settings {
             None => None,
         };
         let video_input_dir = env_path("VWA_VIDEO_INPUT_DIR", data.join("videos"));
+        let audio_input_dir = env_path("VWA_AUDIO_INPUT_DIR", data.join("audio"));
         let reference_input_dir = env_path("VWA_REFERENCE_INPUT_DIR", data.join("references"));
         let video_projects_dir = env_lexical_path(
             "VWA_VIDEO_PROJECTS_DIR",
@@ -132,6 +135,7 @@ impl Settings {
             mcp_token_source,
             funclip_root,
             video_input_dir,
+            audio_input_dir,
             reference_input_dir,
             video_projects_dir,
             receipt_key_file,
@@ -206,6 +210,7 @@ impl Settings {
             &self.generations_dir(),
             &self.video_input_dir,
             &self.reference_input_dir,
+            &self.audio_input_dir,
             &self.video_projects_dir,
             &self.render_jobs_dir(),
         ] {

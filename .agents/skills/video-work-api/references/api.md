@@ -3,14 +3,17 @@
 All REST errors use `{"error":{"code":"...","message":"..."}}`. Unsafe browser
 requests must include an `Origin` whose host exactly matches `Host`.
 Authentication uses an opaque HttpOnly, SameSite=Strict cookie (`vwa_session`);
-never log or persist its plaintext value.
+it persists for at most 30 days and is checked against the same server-side
+expiry. Never log or persist its plaintext value. Logout and an administrator
+password reset revoke the session immediately.
 
 ## REST
 
 - `GET /api/status` is public and never loads the model. Includes `product`,
   `mcp`, `funclip_ready`, `video_editor`, and render queue state.
 - `POST /api/setup` accepts `token` and `password`; available once.
-- `POST /api/auth/login` accepts `password`; `POST /api/auth/logout` signs out.
+- `POST /api/auth/login` accepts `password` and creates a bounded 30-day device
+  session; `POST /api/auth/logout` signs out and immediately revokes it.
 - `POST /api/auth/mcp-token` returns the active env-override or persistent-file MCP token only to an
   authenticated, same-origin admin session. The response is never cacheable.
 - `GET /api/auth/passkeys` lists public passkey metadata for the signed-in admin.
@@ -22,7 +25,8 @@ never log or persist its plaintext value.
   `POST /api/auth/passkeys/login/finish` perform passwordless browser login.
   WebAuthn requires an HTTPS domain, except that `http://localhost:<port>` is
   supported for local development. IP-literal origins are not supported. The
-  admin password remains enabled as a recovery login.
+  admin password remains enabled as a recovery login. Successful passkey login
+  has the same bounded 30-day device session.
 - Model weights (voice CosyVoice3 and translation MADLAD-400-3B) share one
   download mechanism: HF CLI via a pinned Python helper, required-file presence
   checks, and independent single-flight background tasks. Lazy load happens on
@@ -42,6 +46,12 @@ never log or persist its plaintext value.
 - `GET /api/generations/{id}/audio` returns an authenticated WAV response.
 - `POST /api/videos/subtitles` accepts JSON `video_path` relative to
   `VWA_VIDEO_INPUT_DIR` and returns `{segments, srt}` with precise timestamps.
+- `POST /api/audio/transcriptions` accepts JSON `audio_path` relative to
+  `VWA_AUDIO_INPUT_DIR`. `POST /api/audio/transcriptions/upload` accepts one
+  multipart `audio` file per request. Both accept only WAV, MP3, AAC, M4A, or
+  FLAC and return `{text, segments, srt, words}` from the same FunClip stage-1
+  FunASR run. The browser batches up to 50 files by making those one-file
+  uploads sequentially. Uploads are removed after every completed request path.
 - `GET /api/translate/languages` lists curated target languages for MADLAD-400-3B.
   English (`en`) and Russian (`ru`) are listed first for convenient selection;
   any ISO 639 MADLAD target code is also accepted by the translate endpoint.
@@ -92,6 +102,12 @@ Translation actions on `video_editor`:
 
 - `list_translation_languages` — curated languages (en, ru first) plus readiness
 - `translate` — `{target_lang, text?|texts?|srt?|segments?}` using MADLAD-400-3B
+
+Recording transcription action on `video_editor`:
+
+- `transcribe_audio` — `{audio_path}` relative to `VWA_AUDIO_INPUT_DIR`; it
+  accepts WAV, MP3, AAC, M4A, or FLAC and returns direct segment-derived
+  `{text, segments, srt, words}` from one FunClip stage-1 FunASR run.
 
 Every project has one writable source of truth, `project.vpe`. Generated
 `.history/`, `receipts/`, and `exports/` entries are visible but read-only.

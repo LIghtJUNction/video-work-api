@@ -21,11 +21,20 @@ localhost. Optional `VWA_SSL_CERTFILE` and `VWA_SSL_KEYFILE` settings can serve
 HTTPS directly, but certificate issuance and renewal remain the operator's
 responsibility.
 
+Password and passkey login issue an opaque `HttpOnly`, `SameSite=Strict`
+`vwa_session` cookie with a matching server-side expiry of at most 30 days.
+The browser never stores a password or session token in web storage. Signing out
+removes the scoped cookie and revokes its server row; resetting the
+administrator password revokes every active session immediately.
+
 Path sandboxes restrict agent-facing files: videos under `VWA_VIDEO_INPUT_DIR`,
-MCP reference audio stays under `VWA_REFERENCE_INPUT_DIR`. Video Project Editor
-assets stay under each project's private `assets/` directory. Render callers
-cannot supply a command or renderer flags: export compiles the validated VPE
-revision into a canonical private bundle and binds the job to project ID,
+recordings for FunASR transcription under `VWA_AUDIO_INPUT_DIR`, and MCP
+reference audio under `VWA_REFERENCE_INPUT_DIR`. The browser recording batch
+uses the authenticated one-file upload endpoint sequentially; each temporary
+upload is removed after its request completes. Video Project Editor assets stay
+under each project's private `assets/` directory. Render callers cannot supply
+a command or renderer flags: export compiles the validated VPE revision into a
+canonical private bundle and binds the job to project ID,
 revision, document SHA-256, renderer hash, and regular-file asset identities.
 Direct legacy XRY REST/MCP render submission is disabled.
 The database permits only one running render, and an OS-released exclusive lease

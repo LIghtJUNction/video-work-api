@@ -33,7 +33,7 @@ pub fn tool_specs() -> Value {
     json!([
         {
             "name": "video_editor",
-            "description": "The sole Video Work API tool for speakers, consent-gated voices, speech/subtitles/translation, virtual project editing, queued media work, gates, lifecycle, and exports.",
+            "description": "The sole Video Work API tool for speakers, consent-gated voices, speech, FunASR transcription/subtitles/translation, virtual project editing, queued media work, gates, lifecycle, and exports.",
             "inputSchema": {
                 "oneOf": [
                     action_schema("get_status", json!({}), &[]),
@@ -99,6 +99,16 @@ pub fn tool_specs() -> Value {
                         "extract_video_subtitles",
                         json!({ "video_path": { "type": "string" } }),
                         &["video_path"]
+                    ),
+                    action_schema(
+                        "transcribe_audio",
+                        json!({
+                            "audio_path": {
+                                "type": "string",
+                                "description": "Relative WAV, MP3, AAC, M4A, or FLAC path under VWA_AUDIO_INPUT_DIR."
+                            }
+                        }),
+                        &["audio_path"]
                     ),
                     action_schema("list_translation_languages", json!({}), &[]),
                     action_schema(
@@ -470,6 +480,7 @@ mod tests {
                 "generate_speech",
                 "get_generation",
                 "extract_video_subtitles",
+                "transcribe_audio",
                 "list_translation_languages",
                 "translate",
                 "list_projects",

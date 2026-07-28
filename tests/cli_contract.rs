@@ -38,8 +38,27 @@ fn installed_wrapper_reexecutes_passwd_as_the_service_account() {
 
     assert!(wrapper.contains("init|token|mcp-token|setup|model|import|passwd|status|paths|serve"));
     assert!(wrapper.contains("--whitelist-environment="));
+    assert!(wrapper.contains("VWA_VIDEO_INPUT_DIR,VWA_AUDIO_INPUT_DIR,VWA_REFERENCE_INPUT_DIR"));
     assert!(wrapper.contains("-u video-work-api"));
     assert!(wrapper.contains("VWA_DATA_DIR=\"$data_root\" \"$0\" \"$@\""));
+}
+
+#[test]
+fn paths_uses_the_audio_root_captured_at_process_start() {
+    let data_dir = tempdir().unwrap();
+    let audio_dir = data_dir.path().join("recordings");
+    let output = Command::new(env!("CARGO_BIN_EXE_vwactl"))
+        .arg("paths")
+        .env("VWA_DATA_DIR", data_dir.path())
+        .env("VWA_AUDIO_INPUT_DIR", &audio_dir)
+        .env_remove("VWA_MCP_TOKEN")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(String::from_utf8(output.stdout)
+        .unwrap()
+        .contains(&format!("audio: {}", audio_dir.display())));
 }
 
 #[test]

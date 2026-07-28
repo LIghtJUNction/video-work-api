@@ -5,13 +5,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
+pub const SESSION_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
+
 const SCHEMA: &str = r#"
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS admin (
   singleton INTEGER PRIMARY KEY CHECK(singleton=1), password_hash TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
-  token_hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL
+  token_hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS passkeys (
   id TEXT PRIMARY KEY, name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 100),
@@ -123,6 +125,7 @@ impl Database {
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         conn.execute_batch(SCHEMA)?;
+        migrate_sessions(&conn)?;
         if !table_has_column(&conn, "video_projects", "validated_revision")? {
             conn.execute(
                 "ALTER TABLE video_projects ADD COLUMN validated_revision INTEGER",
@@ -213,9 +216,14 @@ impl Database {
 
     pub fn create_session(&self, digest: &str) -> Result<()> {
         let conn = self.lock()?;
+        let created_at = now_secs();
         conn.execute(
-            "INSERT INTO sessions(token_hash,created_at) VALUES(?1,?2)",
-            params![digest, now_secs()],
+            "INSERT INTO sessions(token_hash,created_at,expires_at) VALUES(?1,?2,?3)",
+            params![
+                digest,
+                created_at,
+                created_at.saturating_add(SESSION_TTL_SECONDS)
+            ],
         )?;
         Ok(())
     }
@@ -224,8 +232,8 @@ impl Database {
         let conn = self.lock()?;
         let row: Option<String> = conn
             .query_row(
-                "SELECT token_hash FROM sessions WHERE token_hash=?1",
-                params![digest],
+                "SELECT token_hash FROM sessions WHERE token_hash=?1 AND expires_at>?2",
+                params![digest, now_secs()],
                 |r| r.get(0),
             )
             .optional()?;
@@ -1346,6 +1354,20 @@ fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(names.iter().any(|name| name == column))
+}
+
+fn migrate_sessions(conn: &Connection) -> Result<()> {
+    if !table_has_column(conn, "sessions", "expires_at")? {
+        conn.execute(
+            "ALTER TABLE sessions ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    conn.execute(
+        "UPDATE sessions SET expires_at=created_at + ?1 WHERE expires_at IS NULL OR expires_at=0",
+        params![SESSION_TTL_SECONDS],
+    )?;
+    Ok(())
 }
 
 fn migrate_render_jobs(conn: &Connection) -> Result<()> {

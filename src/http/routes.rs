@@ -26,6 +26,7 @@ use webauthn_rs::prelude::{Passkey, PublicKeyCredential, RegisterPublicKeyCreden
 
 use super::limiter::LoginLimiter;
 use crate::audio::{extension_allowed, MAX_UPLOAD_BYTES};
+use crate::database::SESSION_TTL_SECONDS;
 use crate::error::{AppError, AppResult};
 use crate::filenames::{content_disposition_attachment, download_name_from_text};
 use crate::mcp::{handle_mcp_message, McpResponse};
@@ -41,7 +42,10 @@ use crate::security::{
     verify_password,
 };
 use crate::studio::{Studio, StudioError};
-use crate::subtitles::{video_extension_allowed, SubtitleSegment, MAX_VIDEO_UPLOAD_BYTES};
+use crate::subtitles::{
+    audio_transcription_extension_allowed, video_extension_allowed, SubtitleSegment,
+    MAX_VIDEO_UPLOAD_BYTES,
+};
 use crate::video_editor::{self, EditorError, VideoEditorRequest};
 use crate::{target_text_is_valid, COOKIE_NAME};
 
@@ -52,6 +56,32 @@ pub struct AppState {
     pub passkey_ceremonies: Arc<CeremonyStore>,
     /// Independent single-flight managers for voice and translation weights.
     pub model_downloads: Arc<ModelDownloadRegistry>,
+}
+
+/// Ensures a server-created recording upload is removed on every completed
+/// handler path, including multipart, write, and extractor failures.
+#[derive(Default)]
+struct AudioUploadTemp {
+    path: Option<PathBuf>,
+}
+
+impl AudioUploadTemp {
+    fn set(&mut self, path: PathBuf) {
+        debug_assert!(self.path.is_none());
+        self.path = Some(path);
+    }
+
+    fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+}
+
+impl Drop for AudioUploadTemp {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -114,6 +144,11 @@ pub fn build_router(state: AppState) -> Router {
             get(generation_audio),
         )
         .route("/api/videos/subtitles", post(video_subtitles))
+        .route("/api/audio/transcriptions", post(audio_transcription))
+        .route(
+            "/api/audio/transcriptions/upload",
+            post(audio_transcription_upload).layer(DefaultBodyLimit::disable()),
+        )
         .route("/api/editor", post(video_editor_action))
         .route("/api/editor/events", get(video_editor_events))
         .route(
@@ -278,6 +313,7 @@ fn authenticated_response(
         .http_only(true)
         .same_site(SameSite::Strict)
         .path("/")
+        .max_age(cookie::time::Duration::seconds(SESSION_TTL_SECONDS))
         .secure(secure)
         .build();
     Ok((jar.add(cookie), Json(json!({ "authenticated": true }))).into_response())
@@ -969,9 +1005,12 @@ async fn finish_passkey_login(
 async fn logout(State(state): State<AppState>, jar: CookieJar) -> AppResult<Response> {
     require_auth(&state, &jar)?;
     if let Some(c) = jar.get(COOKIE_NAME) {
-        let _ = state.studio.database.delete_session(&token_hash(c.value()));
+        state
+            .studio
+            .database
+            .delete_session(&token_hash(c.value()))?;
     }
-    let jar = jar.remove(Cookie::from(COOKIE_NAME));
+    let jar = jar.remove(Cookie::build((COOKIE_NAME, "")).path("/").build());
     Ok((jar, Json(json!({ "authenticated": false }))).into_response())
 }
 
@@ -1610,6 +1649,136 @@ async fn generation_audio(
 #[derive(Deserialize)]
 struct SubtitleBody {
     video_path: String,
+}
+
+#[derive(Deserialize)]
+struct AudioTranscriptionBody {
+    audio_path: String,
+}
+
+async fn audio_transcription(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(body): Json<AudioTranscriptionBody>,
+) -> AppResult<Json<Value>> {
+    require_auth(&state, &jar)?;
+    let audio_path = body.audio_path.trim().to_string();
+    if audio_path.is_empty() || audio_path.len() > 4096 {
+        return Err(AppError::invalid_request("audio_path is required"));
+    }
+    let studio = state.studio.clone();
+    let result = tokio::task::spawn_blocking(move || studio.transcribe_audio(&audio_path))
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+    match result {
+        Ok(value) => Ok(Json(value)),
+        Err(error) => Err(audio_transcription_error(&error)),
+    }
+}
+
+fn audio_transcription_error(error: &anyhow::Error) -> AppError {
+    match error.downcast_ref::<StudioError>() {
+        Some(StudioError::InvalidAudioTranscriptionPath) => AppError::api(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_audio_path",
+            "Audio must be a relative regular file inside the configured audio input directory",
+        ),
+        Some(StudioError::UnsupportedTranscriptionAudio) => AppError::api(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_audio",
+            "Supported recording formats are WAV, MP3, AAC, M4A, and FLAC",
+        ),
+        _ => {
+            tracing::warn!(error = %error, "Audio transcription failed");
+            AppError::api(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "audio_transcription_failed",
+                error.to_string(),
+            )
+        }
+    }
+}
+
+async fn audio_transcription_upload(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    mut multipart: Multipart,
+) -> AppResult<Json<Value>> {
+    require_auth(&state, &jar)?;
+    let mut upload = AudioUploadTemp::default();
+
+    while let Some(mut field) = multipart
+        .next_field()
+        .await
+        .map_err(|error| AppError::invalid_request(error.to_string()))?
+    {
+        if field.name() != Some("audio") {
+            continue;
+        }
+        if upload.path().is_some() {
+            return Err(AppError::invalid_request("Only one audio file is allowed"));
+        }
+        let original_name = field.file_name().unwrap_or("");
+        let Some(extension) = Path::new(original_name)
+            .extension()
+            .and_then(|value| value.to_str())
+        else {
+            return Err(AppError::api(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported_audio",
+                "Supported recording formats are WAV, MP3, AAC, M4A, and FLAC",
+            ));
+        };
+        let suffix = format!(".{}", extension.to_ascii_lowercase());
+        if !audio_transcription_extension_allowed(Path::new(&format!("recording{suffix}"))) {
+            return Err(AppError::api(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported_audio",
+                "Supported recording formats are WAV, MP3, AAC, M4A, and FLAC",
+            ));
+        }
+
+        let temp = state.studio.settings.data_dir.join(format!(
+            ".upload-audio-{}{}",
+            Uuid::new_v4(),
+            suffix
+        ));
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .await
+            .map_err(|error| AppError::Internal(error.into()))?;
+        upload.set(temp);
+
+        while let Some(chunk) = field
+            .chunk()
+            .await
+            .map_err(|error| AppError::invalid_request(error.to_string()))?
+        {
+            tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
+                .await
+                .map_err(|error| AppError::Internal(error.into()))?;
+        }
+        tokio::io::AsyncWriteExt::flush(&mut file)
+            .await
+            .map_err(|error| AppError::Internal(error.into()))?;
+    }
+
+    let upload_path = upload
+        .path()
+        .ok_or_else(|| AppError::invalid_request("Audio file is required"))?
+        .to_path_buf();
+    let studio = state.studio.clone();
+    let result =
+        tokio::task::spawn_blocking(move || studio.transcribe_audio_from_upload(&upload_path))
+            .await
+            .map_err(|error| AppError::Internal(error.into()))?;
+
+    match result {
+        Ok(value) => Ok(Json(value)),
+        Err(error) => Err(audio_transcription_error(&error)),
+    }
 }
 
 async fn video_subtitles(

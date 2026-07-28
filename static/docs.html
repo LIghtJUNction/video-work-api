@@ -6,7 +6,7 @@
   <script>try{document.documentElement.dataset.theme=localStorage.getItem("vwa-theme")||"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
   <title>API Docs · Video Work API</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260726-logo">
-  <link rel="stylesheet" href="/static/styles.css?v=20260726-logo">
+  <link rel="stylesheet" href="/static/styles.css?v=20260728-landing-session">
   <script src="/static/theme.js?v=20260721" defer></script>
 </head>
 <body class="docs-page">
@@ -59,7 +59,7 @@
       <p class="eyebrow">01</p>
       <h2 data-i18n="secAuth">认证与源站</h2>
       <ul class="docs-list">
-        <li data-i18n="auth1">浏览器会话使用 HttpOnly、SameSite=Strict Cookie <code>vwa_session</code>，勿记录明文。</li>
+        <li data-i18n="auth1">浏览器会话使用 HttpOnly、SameSite=Strict Cookie <code>vwa_session</code>，最多保持 30 天；退出或重置密码会立即失效，勿记录明文。</li>
         <li data-i18n="auth2">非安全方法（POST/PUT/DELETE…）须带 <code>Origin</code>，且 host 与请求 <code>Host</code> 完全一致（same-origin）。</li>
         <li data-i18n="auth3">MCP 使用 <code>Authorization: Bearer &lt;VWA_MCP_TOKEN&gt;</code>，在有效 Bearer 下豁免同源检查。</li>
         <li data-i18n="auth4"><code>GET /api/status</code> 公开，不会加载模型。</li>
@@ -93,13 +93,13 @@
           <span><code class="method post">POST</code></span>
           <span><code>/api/auth/login</code></span>
           <span data-i18n="authPublic">公开</span>
-          <span data-i18n="descLogin">JSON <code>{password}</code>；设置会话 Cookie。</span>
+          <span data-i18n="descLogin">JSON <code>{password}</code>；设置最多 30 天的设备会话 Cookie。</span>
         </div>
         <div class="endpoint-row" role="row">
           <span><code class="method post">POST</code></span>
           <span><code>/api/auth/logout</code></span>
           <span data-i18n="authSession">会话</span>
-          <span data-i18n="descLogout">清除会话。</span>
+          <span data-i18n="descLogout">清除 Cookie 并立即撤销服务端会话。</span>
         </div>
         <div class="endpoint-row" role="row">
           <span><code class="method post">POST</code></span>
@@ -174,6 +174,18 @@
           <span data-i18n="descSubtitlesUpload">multipart 字段 video（≤2 GB，常见视频格式）；提取后删除临时文件，返回 {segments, srt}。</span>
         </div>
         <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/audio/transcriptions</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descAudioTranscription">JSON <code>{audio_path}</code>，相对于 <code>VWA_AUDIO_INPUT_DIR</code>；仅 WAV、MP3、AAC、M4A、FLAC；返回 <code>{text, segments, srt, words}</code>。</span>
+        </div>
+        <div class="endpoint-row" role="row">
+          <span><code class="method post">POST</code></span>
+          <span><code>/api/audio/transcriptions/upload</code></span>
+          <span data-i18n="authSession">会话</span>
+          <span data-i18n="descAudioTranscriptionUpload">每次请求一个 multipart <code>audio</code> 字段；仅 WAV、MP3、AAC、M4A、FLAC；浏览器最多 50 个文件时逐个顺序请求，临时上传在请求结束后删除。</span>
+        </div>
+        <div class="endpoint-row" role="row">
           <span><code class="method get">GET</code></span>
           <span><code>/api/translate/languages</code></span>
           <span data-i18n="authSession">会话</span>
@@ -240,9 +252,10 @@
         <div class="endpoint-row" role="row">
           <span><code>video_editor</code></span>
           <span><code>{action, …}</code></span>
-          <span data-i18n="toolEditor">唯一 MCP 工具。action 覆盖状态、声音、字幕、工程树/文件、revision 写入、Validate、Export、任务查询/取消、质量门禁与生命周期。</span>
+          <span data-i18n="toolEditor">唯一 MCP 工具。action 覆盖状态、声音、录音转写、字幕、工程树/文件、revision 写入、Validate、Export、任务查询/取消、质量门禁与生命周期。</span>
         </div>
       </div>
+      <p class="docs-note" data-i18n="mcpTranscription"><code>transcribe_audio</code> action 接受 <code>{audio_path}</code>，路径必须相对于 <code>VWA_AUDIO_INPUT_DIR</code>；返回同一次 FunASR 识别的 <code>{text, segments, srt, words}</code>。</p>
       <p class="docs-note" data-i18n="mcpNote">
         集成时不得绕过同意确认、认证、文件大小/时长、逐字稿、所有权、路径沙箱或同源检查。
       </p>
@@ -274,6 +287,13 @@
   -H "Origin: http://127.0.0.1:7860" \
   -H "Content-Type: application/json" \
   -d '{"video_path":"clip.mp4"}'</code></pre>
+
+      <h3 data-i18n="exTranscription">录音转写</h3>
+      <pre class="docs-code"><code>curl -sS -c cookies.txt -b cookies.txt \
+  -X POST "http://127.0.0.1:7860/api/audio/transcriptions" \
+  -H "Origin: http://127.0.0.1:7860" \
+  -H "Content-Type: application/json" \
+  -d '{"audio_path":"meeting.m4a"}'</code></pre>
     </section>
   </main>
 
@@ -292,7 +312,7 @@
         secEditor: "Video Project Editor",
         secMcp: "HTTP MCP",
         secExamples: "示例",
-        auth1: "浏览器会话使用 HttpOnly、SameSite=Strict Cookie vwa_session，勿记录明文。",
+        auth1: "浏览器会话使用 HttpOnly、SameSite=Strict Cookie vwa_session，最多保持 30 天；退出或重置密码会立即失效，勿记录明文。",
         auth2: "非安全方法（POST/PUT/DELETE…）须带 Origin，且 host 与请求 Host 完全一致（same-origin）。",
         auth3: "MCP 使用 Authorization: Bearer <VWA_MCP_TOKEN>，在有效 Bearer 下豁免同源检查。",
         auth4: "GET /api/status 公开，不会加载模型。",
@@ -307,8 +327,8 @@
         authSession: "会话",
         descStatus: "服务状态：configured、model_present、model_ready、funclip_ready、mcp 等。",
         descSetup: "JSON {token, password}；password ≥ 12 字符。完成后删除 setup-token。",
-        descLogin: "JSON {password}；设置会话 Cookie。",
-        descLogout: "清除会话。",
+        descLogin: "JSON {password}；设置最多 30 天的设备会话 Cookie。",
+        descLogout: "清除 Cookie 并立即撤销服务端会话。",
         descMcpToken: "仅向同源管理员会话返回 MCP Token；响应禁止缓存。",
         descListSpeakers: "列出说话人与参考音色档案。",
         descAddSpeaker: "JSON {name}。",
@@ -322,6 +342,10 @@
         descSubtitles: "JSON {video_path} 相对于 VWA_VIDEO_INPUT_DIR；返回 {segments, srt}。",
         descSubtitlesUpload:
           "multipart 字段 video（≤2 GB，常见视频格式）；提取后删除临时文件，返回 {segments, srt}。",
+        descAudioTranscription:
+          "JSON {audio_path} 相对于 VWA_AUDIO_INPUT_DIR；仅 WAV、MP3、AAC、M4A、FLAC；返回 {text, segments, srt, words}。",
+        descAudioTranscriptionUpload:
+          "每次请求一个 multipart 字段 audio；仅 WAV、MP3、AAC、M4A、FLAC；浏览器最多 50 个文件时逐个顺序请求，临时上传在请求结束后删除。",
         descEditorAction: "与 video_editor MCP 工具相同的 action 对象；写入仍受同源与 revision CAS 保护。",
         descEditorEvents: "同源、Cookie 认证 SSE：工程 revision、校验状态与脱敏队列任务事件；禁止 query/Bearer token。",
         editorIntro: "访问 /editor 使用纯文本方式浏览多个虚拟视频工程。project.vpe 是唯一可写文件；assets、.history、receipts 与 exports 可查看但只读。",
@@ -341,12 +365,14 @@
         toolGen: "返回本地 audio_path",
         toolGetGen: "查询生成任务",
         toolSubs: "路径须在 VWA_VIDEO_INPUT_DIR 下",
-        toolEditor: "唯一 MCP 工具。action 覆盖状态、声音、字幕、工程树/文件、revision 写入、Validate、Export、任务查询/取消、质量门禁与生命周期。",
+        toolEditor: "唯一 MCP 工具。action 覆盖状态、声音、录音转写、字幕、工程树/文件、revision 写入、Validate、Export、任务查询/取消、质量门禁与生命周期。",
+        mcpTranscription: "transcribe_audio action 接受 {audio_path}，路径必须相对于 VWA_AUDIO_INPUT_DIR；返回同一次 FunASR 识别的 {text, segments, srt, words}。",
         mcpNote: "集成时不得绕过同意确认、认证、文件大小/时长、逐字稿、所有权、路径沙箱或同源检查。",
         exStatus: "状态",
         exLogin: "登录（浏览器同源）",
         exMcp: "MCP tools/list",
         exSubs: "字幕提取",
+        exTranscription: "录音转写",
       },
       en: {
         title: "Video Work API",
@@ -361,7 +387,7 @@
         secEditor: "Video Project Editor",
         secMcp: "HTTP MCP",
         secExamples: "Examples",
-        auth1: "Browser sessions use an HttpOnly, SameSite=Strict cookie vwa_session — never log its plaintext.",
+        auth1: "Browser sessions use an HttpOnly, SameSite=Strict vwa_session cookie for at most 30 days. Sign-out or password reset invalidates it immediately; never log its plaintext.",
         auth2: "Unsafe methods (POST/PUT/DELETE…) require Origin whose host matches Host (same-origin).",
         auth3: "MCP uses Authorization: Bearer <VWA_MCP_TOKEN>; valid bearer skips same-origin checks.",
         auth4: "GET /api/status is public and never loads the model.",
@@ -376,8 +402,8 @@
         authSession: "Session",
         descStatus: "Service status: configured, model_present, model_ready, funclip_ready, mcp, …",
         descSetup: "JSON {token, password}; password ≥ 12 chars. Deletes setup-token on success.",
-        descLogin: "JSON {password}; sets session cookie.",
-        descLogout: "Clears the session.",
+        descLogin: "JSON {password}; sets a device session cookie for at most 30 days.",
+        descLogout: "Clears the cookie and immediately revokes the server session.",
         descMcpToken: "Returns the MCP token only to a same-origin admin session; the response is not cacheable.",
         descListSpeakers: "List speakers and reference profiles.",
         descAddSpeaker: "JSON {name}.",
@@ -391,6 +417,10 @@
         descSubtitles: "JSON {video_path} under VWA_VIDEO_INPUT_DIR; returns {segments, srt}.",
         descSubtitlesUpload:
           "multipart field video (≤2 GB, common video formats); the temp file is deleted after extraction; returns {segments, srt}.",
+        descAudioTranscription:
+          "JSON {audio_path} relative to VWA_AUDIO_INPUT_DIR; WAV, MP3, AAC, M4A, and FLAC only; returns {text, segments, srt, words}.",
+        descAudioTranscriptionUpload:
+          "One multipart audio field per request; WAV, MP3, AAC, M4A, and FLAC only. The browser batches up to 50 files by making those requests sequentially; each temporary upload is removed after its request completes.",
         descEditorAction: "The same action object as the video_editor MCP tool; writes retain same-origin and revision CAS protection.",
         descEditorEvents: "Same-origin, cookie-authenticated SSE for project revisions, validation state, and sanitized queue jobs; query and bearer tokens are rejected.",
         editorIntro: "Open /editor to browse multiple virtual video projects as plain text. project.vpe is the only writable file; assets, .history, receipts, and exports are visible but read-only.",
@@ -410,12 +440,14 @@
         toolGen: "Returns local audio_path",
         toolGetGen: "Fetch a generation job",
         toolSubs: "Path under VWA_VIDEO_INPUT_DIR",
-        toolEditor: "The sole MCP tool. Its action enum covers status, voices, subtitles, project trees/files, revision writes, Validate, Export, job lookup/cancel, quality gates, and lifecycle.",
+        toolEditor: "The sole MCP tool. Its action enum covers status, voices, recording transcription, subtitles, project trees/files, revision writes, Validate, Export, job lookup/cancel, quality gates, and lifecycle.",
+        mcpTranscription: "The transcribe_audio action accepts {audio_path} relative to VWA_AUDIO_INPUT_DIR and returns {text, segments, srt, words} from the same FunASR run.",
         mcpNote: "Do not bypass consent, auth, size/duration, transcript, ownership, path sandbox, or same-origin checks.",
         exStatus: "Status",
         exLogin: "Login (browser same-origin)",
         exMcp: "MCP tools/list",
         exSubs: "Subtitle extraction",
+        exTranscription: "Recording transcription",
       },
     };
 

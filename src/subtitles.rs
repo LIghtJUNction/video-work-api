@@ -25,6 +25,17 @@ pub struct SubtitleSegment {
 
 pub const MAX_VIDEO_UPLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
+/// Formats accepted by FunClip stage-1 for standalone recording transcription.
+/// Keep this narrower than voice-reference uploads: it mirrors the upstream
+/// Paraformer recording path exactly.
+pub fn audio_transcription_extension_allowed(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    matches!(ext.as_deref(), Some("wav" | "mp3" | "aac" | "m4a" | "flac"))
+}
+
 pub fn video_extension_allowed(path: &Path) -> bool {
     let ext = path
         .extension()
@@ -447,6 +458,27 @@ mod tests {
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[0].start, "00:00:00.000");
         assert_eq!(segs[1].text, "hi");
+    }
+
+    #[test]
+    fn recording_extensions_match_funclip_stage_one() {
+        for accepted in [
+            "recording.wav",
+            "recording.MP3",
+            "recording.aac",
+            "recording.m4a",
+            "recording.flac",
+        ] {
+            assert!(audio_transcription_extension_allowed(Path::new(accepted)));
+        }
+        for rejected in [
+            "recording.ogg",
+            "recording.webm",
+            "recording.mp4",
+            "recording.txt",
+        ] {
+            assert!(!audio_transcription_extension_allowed(Path::new(rejected)));
+        }
     }
 
     #[test]
