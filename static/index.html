@@ -6,7 +6,7 @@
   <script>try{document.documentElement.dataset.theme=localStorage.getItem("vwa-theme")||"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
   <title>Video Work API · 视频工作 API</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260726-logo">
-  <link rel="stylesheet" href="/static/styles.css?v=20260726-logo">
+  <link rel="stylesheet" href="/static/styles.css?v=20260728-landing-session">
   <script src="/static/theme.js?v=20260721" defer></script>
 </head>
 <body>
@@ -31,23 +31,9 @@
   <main>
     <section class="hero">
       <div class="hero-copy">
-        <p class="eyebrow" data-i18n="workspaceEyebrow">VOICE WORKSPACE</p>
-        <h1 data-i18n="workspaceTitle">把声音，变成可复用的创作资产。</h1>
-        <p class="hero-lead" data-i18n="workspaceLead">导入有明确授权的参考音频，保存精确逐字稿，然后生成自然、稳定的语音。</p>
-      </div>
-      <div class="hero-visual">
-        <svg class="hero-art" viewBox="0 0 440 380" role="img" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-          <path id="ivory-carrier" fill="#FAF9F5" d="M222 47 C 301 41, 367 95, 373 176 C 379 255, 331 323, 237 331 C 151 338, 75 301, 67 207 C 59 121, 143 53, 222 47 Z"/>
-          <circle id="voice-source" cx="192" cy="150" r="17" fill="#141413"/>
-          <g fill="none" stroke="#141413" stroke-width="7" stroke-linecap="round">
-            <path id="ripple-1" d="M232 118 C 256 131, 258 172, 234 188"/>
-            <path id="ripple-2" d="M260 98 C 302 120, 306 186, 262 210"/>
-            <path id="ripple-3" d="M290 78 C 348 110, 352 200, 292 232"/>
-            <path id="wave-band" d="M96 288 C 106 266, 116 264, 126 287 C 136 310, 146 311, 156 288 C 166 268, 176 267, 186 289 C 196 310, 206 310, 216 289 C 226 270, 236 270, 246 290 C 256 309, 266 308, 276 289 C 286 272, 296 272, 306 290 C 316 307, 326 306, 336 290 C 346 276, 356 275, 366 287"/>
-          </g>
-          <circle cx="332" cy="96" r="8" fill="#141413"/>
-          <circle cx="110" cy="230" r="7" fill="#141413"/>
-        </svg>
+        <p class="eyebrow" data-i18n="workspaceEyebrow">VIDEO WORKSPACE</p>
+        <h1 data-i18n="workspaceTitle">让声音、字幕与视频创作，汇成可复用的工作流。</h1>
+        <p class="hero-lead" data-i18n="workspaceLead">批量转写录音，提取并翻译字幕，生成自然语音，再完成视频创作与交付。</p>
         <div class="endpoint-card">
           <div class="endpoint-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12.5 L 12.2 3.8"/><path d="M5.2 3.6 L 12.4 3.5 L 12.3 10.7"/></svg></div>
           <div><span class="endpoint-label" data-i18n="endpointLabel">MCP SERVER</span><strong><code>/mcp</code></strong><p data-i18n="mcpHint">MCP 服务器运行在此端点，使用 Bearer Token 认证。</p><button id="copyAgentPrompt" class="secondary compact endpoint-copy hidden" type="button" data-i18n="copyAgentPrompt">复制 Agent 提示词</button></div>
@@ -63,6 +49,7 @@
     <section id="loginView" class="card auth-card hidden">
       <span class="step-badge">02</span>
       <h2 data-i18n="loginTitle">管理员登录</h2><form id="loginForm"><label><span data-i18n="passwordShort">密码</span><input name="password" type="password" required autocomplete="current-password"></label><button data-i18n="login">登录</button></form>
+      <p class="hint" data-i18n="loginSessionHint">登录后，此设备将保持登录 30 天；退出或重置密码会立即失效。</p>
       <div class="auth-divider"><span data-i18n="or">或</span></div>
       <button id="passkeyLogin" class="secondary hidden" type="button" data-i18n="passkeyLogin">使用 Passkey 登录</button>
       <p id="passkeyLoginSupport" class="hint hidden" data-i18n="passkeyUnsupported">当前浏览器或连接不支持 Passkey；远程访问请使用 HTTPS。</p>
@@ -123,8 +110,29 @@
           <div id="subtitleJobs" class="job-list"></div>
         </div>
       </section>
+      <section class="card audio-transcription">
+        <div class="section-heading"><div><p class="eyebrow" data-i18n="audioTranscriptionEyebrow">TRANSCRIBE</p><h2 data-i18n="audioTranscriptionTitle">录音转文字</h2><p class="section-lead" data-i18n="audioTranscriptionLead">批量上传录音文件，用 FunASR 获取可复制文本和时间码。</p></div><span class="section-number">03</span></div>
+        <form id="audioTranscriptionForm">
+          <div class="grow upload-field">
+            <span data-i18n="audioTranscriptionUpload">录音文件（WAV、MP3、AAC、M4A、FLAC；最多 50 个）</span>
+            <div class="upload-control">
+              <input id="audioTranscriptionFile" name="audio" type="file" multiple accept=".wav,.mp3,.aac,.m4a,.flac" class="visually-hidden" aria-describedby="audioTranscriptionCount audioTranscriptionError">
+              <button id="audioTranscriptionFileButton" type="button" class="secondary compact" data-i18n="chooseAudio">选择录音文件</button>
+              <span id="audioTranscriptionFileName" class="upload-name" data-i18n="audioTranscriptionNoFile">未选择录音文件</span>
+              <button id="audioTranscriptionFileClear" type="button" class="secondary compact hidden" data-i18n-aria-label="clearFiles" aria-label="清空已选文件" data-i18n="clear">清空</button>
+            </div>
+          </div>
+          <div class="batch-toolbar"><span id="audioTranscriptionCount" class="batch-count"></span><span id="audioTranscriptionError" class="field-error" role="alert"></span></div>
+          <button id="audioTranscriptionButton" type="submit">转写 0 个录音</button>
+        </form>
+        <p class="hint" data-i18n="audioTranscriptionHint">使用现有 FunClip stage-1 FunASR Paraformer；浏览器逐个上传并转写，不会进行第二次转写。</p>
+        <div id="audioTranscriptionBatch" class="batch-results hidden">
+          <div class="batch-progress"><span id="audioTranscriptionProgressText" role="status" aria-live="polite" aria-atomic="true"></span><progress id="audioTranscriptionProgress" max="1" value="0"></progress><button id="retryAudioTranscriptionFailures" type="button" class="secondary compact hidden"></button></div>
+          <div id="audioTranscriptionJobs" class="job-list"></div>
+        </div>
+      </section>
       <section class="card translate">
-        <div class="section-heading"><div><p class="eyebrow" data-i18n="translateEyebrow">TRANSLATE</p><h2 data-i18n="translateTitle">多语言翻译</h2><p class="section-lead" data-i18n="translateLead">使用 MADLAD-400-3B 翻译纯文本或 SRT 字幕；英文与俄语排在语言列表前两位。</p></div><span class="section-number">03</span></div>
+        <div class="section-heading"><div><p class="eyebrow" data-i18n="translateEyebrow">TRANSLATE</p><h2 data-i18n="translateTitle">多语言翻译</h2><p class="section-lead" data-i18n="translateLead">使用 MADLAD-400-3B 翻译纯文本或 SRT 字幕；英文与俄语排在语言列表前两位。</p></div><span class="section-number">04</span></div>
         <form id="translateForm">
           <label><span data-i18n="targetLang">目标语言</span>
             <select id="targetLang" name="target_lang" required>
@@ -146,7 +154,7 @@
         </div>
       </section>
       <section class="card passkeys">
-        <div class="section-heading"><div><p class="eyebrow">PASSKEYS</p><h2 data-i18n="passkeysTitle">Passkey 管理</h2><p class="section-lead" data-i18n="passkeysLead">添加本机或安全密钥，下次可免输密码登录。</p></div><span class="section-number">04</span></div>
+        <div class="section-heading"><div><p class="eyebrow">PASSKEYS</p><h2 data-i18n="passkeysTitle">Passkey 管理</h2><p class="section-lead" data-i18n="passkeysLead">添加本机或安全密钥，下次可免输密码登录。</p></div><span class="section-number">05</span></div>
         <p id="passkeySupport" class="hint hidden"></p>
         <form id="passkeyForm" class="inline"><label class="grow"><span data-i18n="passkeyName">设备名称</span><input name="name" maxlength="100" required placeholder="MacBook Touch ID"></label><button data-i18n="addPasskey">添加 Passkey</button></form>
         <div id="passkeyList" class="passkey-list"></div>
@@ -186,6 +194,6 @@
   </template>
   <script src="/static/batch-core.js?v=20260722e"></script>
   <script src="/static/agent-prompt.js?v=20260722-1"></script>
-  <script src="/static/app.js?v=20260724-translate"></script>
+  <script src="/static/app.js?v=20260728-landing-session"></script>
 </body>
 </html>

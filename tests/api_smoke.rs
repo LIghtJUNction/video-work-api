@@ -2,21 +2,39 @@
 
 use std::fs;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
+use rusqlite::{params, Connection};
 use tempfile::tempdir;
 use tower::ServiceExt;
+use video_work_api::alignment::WordTimestamp;
 use video_work_api::config::{McpTokenSource, Settings};
-use video_work_api::database::{Database, NewRenderJob};
+use video_work_api::database::{Database, NewRenderJob, SESSION_TTL_SECONDS};
 use video_work_api::engine::FakeEngine;
 use video_work_api::http::{build_router, AppState, LoginLimiter};
 use video_work_api::model::ModelDownloadRegistry;
 use video_work_api::passkeys::CeremonyStore;
 use video_work_api::studio::Studio;
-use video_work_api::subtitles::FakeSubtitles;
+use video_work_api::subtitles::{FakeSubtitles, SubtitleExtractor, SubtitleSegment};
 use video_work_api::translation::FakeTranslationEngine;
+
+struct FailingSubtitles;
+
+impl SubtitleExtractor for FailingSubtitles {
+    fn ready(&self) -> bool {
+        true
+    }
+
+    fn extract(
+        &self,
+        _path: &std::path::Path,
+    ) -> anyhow::Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
+        anyhow::bail!("fake FunClip failure")
+    }
+}
 
 fn test_settings(root: &std::path::Path) -> Settings {
     Settings {
@@ -34,6 +52,7 @@ fn test_settings(root: &std::path::Path) -> Settings {
         mcp_token_source: Some(McpTokenSource::Environment),
         funclip_root: None,
         video_input_dir: root.join("videos"),
+        audio_input_dir: root.join("audio"),
         reference_input_dir: root.join("references"),
         video_projects_dir: root.join("video-projects"),
         receipt_key_file: root.join("receipt.key"),
@@ -149,7 +168,8 @@ async fn setup_login_and_status() {
                 .method("POST")
                 .uri("/api/auth/login")
                 .header("host", "testserver")
-                .header("origin", "http://testserver")
+                .header("origin", "https://testserver")
+                .header("x-forwarded-proto", "https")
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"password":"correct horse battery staple"}"#))
                 .unwrap(),
@@ -164,13 +184,21 @@ async fn setup_login_and_status() {
         .to_str()
         .unwrap()
         .to_string();
+    assert!(cookie.starts_with("vwa_session="));
+    assert!(cookie.contains("HttpOnly"));
+    assert!(cookie.contains("SameSite=Strict"));
+    assert!(cookie.contains("Path=/"));
+    assert!(cookie.contains("Max-Age=2592000"));
+    assert!(cookie.contains("Secure"));
+    let cookie_pair = cookie.split(';').next().unwrap().to_string();
 
     let res = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
                 .uri("/api/status")
-                .header("cookie", cookie.split(';').next().unwrap())
+                .header("cookie", &cookie_pair)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -188,8 +216,88 @@ async fn setup_login_and_status() {
     assert_eq!(json["translation"]["model"], "google/madlad400-3b-mt");
     assert_eq!(json["models"]["voice"]["kind"], "voice");
     assert_eq!(json["models"]["translation"]["kind"], "translation");
-    assert_eq!(json["models"]["translation"]["id"], "google/madlad400-3b-mt");
+    assert_eq!(
+        json["models"]["translation"]["id"],
+        "google/madlad400-3b-mt"
+    );
     assert_eq!(json["limits"]["max_translate_segments"], 200);
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/logout")
+                .header("host", "testserver")
+                .header("origin", "https://testserver")
+                .header("cookie", &cookie_pair)
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let cleared_cookie = res.headers().get("set-cookie").unwrap().to_str().unwrap();
+    assert!(cleared_cookie.contains("Path=/"));
+    assert!(cleared_cookie.contains("Max-Age=0"));
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/status")
+                .header("cookie", &cookie_pair)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(body_json(res).await["authenticated"], false);
+}
+
+#[test]
+fn legacy_sessions_gain_a_bounded_expiry_and_expired_rows_are_rejected() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("legacy.sqlite3");
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE sessions (
+               token_hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL
+             );",
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO sessions(token_hash,created_at) VALUES(?1,?2)",
+            params!["legacy-session", created_at],
+        )
+        .unwrap();
+    drop(connection);
+
+    let database = Database::open(&path).unwrap();
+    let connection = Connection::open(&path).unwrap();
+    let expires_at: i64 = connection
+        .query_row(
+            "SELECT expires_at FROM sessions WHERE token_hash='legacy-session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(expires_at, created_at + SESSION_TTL_SECONDS);
+    assert!(database.session_exists("legacy-session").unwrap());
+
+    connection
+        .execute(
+            "UPDATE sessions SET expires_at=?1 WHERE token_hash=?2",
+            params![created_at - 1, "legacy-session"],
+        )
+        .unwrap();
+    assert!(!database.session_exists("legacy-session").unwrap());
 }
 
 #[tokio::test]
@@ -820,6 +928,11 @@ async fn editor_mcp_requires_bearer_and_dispatches_single_tool() {
     fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
     let settings = test_settings(root);
     settings.create_data_dirs().unwrap();
+    fs::write(
+        settings.audio_input_dir.join("mcp-recording.wav"),
+        b"fake recording",
+    )
+    .unwrap();
     let studio = Arc::new(Studio::new(
         settings.clone(),
         Database::open(settings.database_path()).unwrap(),
@@ -908,6 +1021,38 @@ async fn editor_mcp_requires_bearer_and_dispatches_single_tool() {
     assert_eq!(
         body_json(response).await["result"]["structuredContent"]["service"],
         "Video Work API"
+    );
+
+    let transcription = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "tools/call",
+        "params": {
+            "name": "video_editor",
+            "arguments": {
+                "action": "transcribe_audio",
+                "audio_path": "mcp-recording.wav"
+            }
+        }
+    })
+    .to_string();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("authorization", "Bearer mcp-secret-token")
+                .header("content-type", "application/json")
+                .body(Body::from(transcription))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(response).await["result"]["structuredContent"]["text"],
+        "hello world"
     );
 
     let legacy = serde_json::json!({
@@ -1317,6 +1462,288 @@ async fn subtitle_upload_requires_auth_extracts_and_cleans_up() {
         })
         .collect();
     assert!(leftovers.is_empty(), "upload temp files must be removed");
+}
+
+#[tokio::test]
+async fn audio_transcription_requires_auth_sandboxes_and_cleans_uploads() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("static")).unwrap();
+    fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
+    let settings = test_settings(root);
+    settings.create_data_dirs().unwrap();
+    fs::write(
+        settings.audio_input_dir.join("meeting.m4a"),
+        b"fake recording",
+    )
+    .unwrap();
+    fs::write(settings.audio_input_dir.join("notes.txt"), b"not audio").unwrap();
+    let db = Database::open(settings.database_path()).unwrap();
+    db.set_admin(&video_work_api::security::hash_password("correct horse battery staple").unwrap())
+        .unwrap();
+    let studio = Arc::new(Studio::new(
+        settings.clone(),
+        db,
+        Arc::new(FakeEngine::new()),
+        Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
+    ));
+    let app = build_router(AppState {
+        studio,
+        limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
+    });
+
+    let boundary = "vwa-audio-test-boundary";
+    let multipart = |filename: &str| -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"{filename}\"\r\nContent-Type: audio/octet-stream\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(b"fake recording bytes");
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        body
+    };
+    let content_type = format!("multipart/form-data; boundary={boundary}");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/audio/transcriptions")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"audio_path":"meeting.m4a"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"password":"correct horse battery staple"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let cookie = response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/audio/transcriptions")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"audio_path":"notes.txt"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/audio/transcriptions")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"audio_path":"../audio/meeting.m4a"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/audio/transcriptions")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"audio_path":"meeting.m4a"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["text"], "hello world");
+    assert_eq!(json["segments"][0]["text"], "hello world");
+    assert!(json["srt"].as_str().unwrap().contains("hello world"));
+    assert!(json["words"].is_array());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/audio/transcriptions/upload")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header("content-type", &content_type)
+                .body(Body::from(multipart("meeting.txt")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/audio/transcriptions/upload")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header("content-type", &content_type)
+                .body(Body::from(multipart("meeting.FLAC")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_json(response).await["text"], "hello world");
+
+    let leftovers: Vec<_> = fs::read_dir(&settings.data_dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".upload-audio-")
+        })
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "recording upload temp files must be removed"
+    );
+}
+
+#[tokio::test]
+async fn audio_transcription_upload_cleans_temp_after_extractor_failure() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("static")).unwrap();
+    fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
+    let settings = test_settings(root);
+    settings.create_data_dirs().unwrap();
+    let db = Database::open(settings.database_path()).unwrap();
+    db.set_admin(&video_work_api::security::hash_password("correct horse battery staple").unwrap())
+        .unwrap();
+    let studio = Arc::new(Studio::new(
+        settings.clone(),
+        db,
+        Arc::new(FakeEngine::new()),
+        Arc::new(FailingSubtitles),
+        Arc::new(FakeTranslationEngine::new()),
+    ));
+    let app = build_router(AppState {
+        studio,
+        limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
+    });
+
+    let login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"password":"correct horse battery staple"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let cookie = login
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let boundary = "vwa-failing-audio-boundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"meeting.wav\"\r\nContent-Type: audio/wav\r\n\r\nfake recording\r\n--{boundary}--\r\n"
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/audio/transcriptions/upload")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let leftovers: Vec<_> = fs::read_dir(&settings.data_dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".upload-audio-")
+        })
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "failed recording uploads must be removed"
+    );
 }
 
 #[tokio::test]

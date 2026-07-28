@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path};
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
@@ -14,7 +14,7 @@ use crate::model::{
     model_files_present, model_kind_files_present, translation_model_files_present, ModelKind,
 };
 use crate::paths::{resolve_under_root, safe_owned_file};
-use crate::subtitles::{SubtitleExtractor, SubtitleSegment};
+use crate::subtitles::{audio_transcription_extension_allowed, SubtitleExtractor, SubtitleSegment};
 use crate::translation::{
     self, languages_payload, TranslationEngine, MAX_TRANSLATE_SEGMENTS, MAX_TRANSLATE_TEXT_CHARS,
     MAX_TRANSLATE_TOTAL_CHARS,
@@ -474,6 +474,48 @@ impl Studio {
             "words": words,
         }))
     }
+
+    /// Transcribe a recording kept under the dedicated recording input root.
+    pub fn transcribe_audio(&self, audio_path_raw: &str) -> Result<Value> {
+        let raw_path = Path::new(audio_path_raw);
+        if raw_path.is_absolute()
+            || raw_path
+                .components()
+                .any(|component| component == Component::ParentDir)
+        {
+            return Err(StudioError::InvalidAudioTranscriptionPath.into());
+        }
+        let audio_path =
+            resolve_under_root(audio_path_raw, self.settings.audio_input_dir.as_path())
+                .ok_or(StudioError::InvalidAudioTranscriptionPath)?;
+        self.transcribe_audio_file(&audio_path)
+    }
+
+    /// Transcribe a server-created temporary upload after its extension has
+    /// been retained in the generated filename.
+    pub fn transcribe_audio_from_upload(&self, audio_path: &Path) -> Result<Value> {
+        self.transcribe_audio_file(audio_path)
+    }
+
+    fn transcribe_audio_file(&self, audio_path: &Path) -> Result<Value> {
+        if !audio_transcription_extension_allowed(audio_path) {
+            return Err(StudioError::UnsupportedTranscriptionAudio.into());
+        }
+        let (segments, srt, words) = self.subtitles.extract(audio_path)?;
+        // This is a stable, direct rendering of the segments returned by the
+        // one FunClip/FunASR run; it intentionally performs no second inference.
+        let text = segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(json!({
+            "text": text,
+            "segments": segments,
+            "srt": srt,
+            "words": words,
+        }))
+    }
 }
 
 /// Python used for CosyVoice/FunClip helpers (venv preferred).
@@ -516,4 +558,8 @@ pub enum StudioError {
     GenerationFailed,
     #[error("generation_not_found")]
     GenerationNotFound,
+    #[error("invalid_audio_transcription_path")]
+    InvalidAudioTranscriptionPath,
+    #[error("unsupported_transcription_audio")]
+    UnsupportedTranscriptionAudio,
 }

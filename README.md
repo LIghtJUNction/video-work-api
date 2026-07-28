@@ -5,7 +5,8 @@
 **A self-hosted voice and subtitle workspace for people, applications, and AI agents.**
 
 Authorized zero-shot voice cloning with CosyVoice3, time-coded video subtitles
-with FunClip, and a browser studio—served by one authenticated Rust service.
+and recording transcription with FunClip stage-1 FunASR, and a browser
+studio—served by one authenticated Rust service.
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
@@ -117,8 +118,11 @@ Hub cache, and requires the `hf` CLI.
 After password login, you can register a passkey. WebAuthn requires an HTTPS
 domain, except for `http://localhost:<port>` during local development; literal
 IP origins are not supported. The administrator password remains a recovery
-login. Reset it interactively with `./scripts/vwactl passwd` (source) or
-`sudo vwactl passwd` (package).
+login. Password and passkey logins keep this device signed in for at most 30
+days with an opaque `HttpOnly`, `SameSite=Strict` cookie and matching server
+expiry. Sign out or a password reset invalidates the session immediately. Reset
+the password interactively with `./scripts/vwactl passwd` (source) or `sudo
+vwactl passwd` (package).
 
 </details>
 
@@ -126,7 +130,8 @@ login. Reset it interactively with `./scripts/vwactl passwd` (source) or
 
 The English/Chinese studio provides:
 
-- one-time setup, administrator sessions, and optional passkey login;
+- one-time setup, bounded 30-day administrator device sessions, and optional
+  passkey login;
 - speaker and voice-profile creation, rename, and guarded deletion;
 - browser microphone recording or audio upload with exact transcript and
   explicit consent confirmation;
@@ -134,6 +139,9 @@ The English/Chinese studio provides:
   human-readable downloads;
 - batch subtitle extraction from sandboxed paths and local uploads (up to 2 GiB
   each), with progress, retry, preview, and SRT download;
+- batch recording-file transcription for WAV, MP3, AAC, M4A, and FLAC uploads
+  (up to 50 files), with sequential per-file processing, retry, direct text,
+  time-coded segment preview, and SRT download;
 - authenticated model-download status and a **Copy agent prompt** flow for
   configuring Codex or Claude Code without exposing the token before login.
 
@@ -145,19 +153,19 @@ These are intentionally separate trust paths:
 
 | Interface | Intended client | Authentication | Browser origin policy |
 |---|---|---|---|
-| REST under `/api/*` | Web studio and application integrations | Public status, one-time setup, password login, and passkey-login entry points; authenticated endpoints use an opaque `HttpOnly`, `SameSite=Strict` admin session | Unsafe requests require the `Origin` host and port to match `Host` |
+| REST under `/api/*` | Web studio and application integrations | Public status, one-time setup, password login, and passkey-login entry points; authenticated endpoints use an opaque `HttpOnly`, `SameSite=Strict` admin session that lasts at most 30 days and is immediately revoked by sign-out or password reset | Unsafe requests require the `Origin` host and port to match `Host` |
 | HTTP MCP at `POST /mcp` | Trusted AI agents | `Authorization: Bearer <VWA_MCP_TOKEN>` | Bearer-authenticated MCP is exempt from browser same-origin checks |
 
 REST covers setup, login/logout, passkeys, model download, speaker/profile
-management, speech generation, authenticated WAV retrieval, and subtitle
-extraction. See the live `/docs` page after starting the service for a compact
-endpoint reference.
+management, speech generation, authenticated WAV retrieval, video subtitle
+extraction, and recording transcription. See the live `/docs` page after
+starting the service for a compact endpoint reference.
 
 ### The `video_editor` MCP tool
 
 | Tool | Purpose |
 |---|---|
-| `video_editor` | The sole MCP tool: speakers, consent-gated voice profiles, speech/subtitles, virtual project editing, real queued media analysis/covers, quality gates, lifecycle, and queued exports |
+| `video_editor` | The sole MCP tool: speakers, consent-gated voice profiles, speech, FunASR recording transcription/subtitles, virtual project editing, real queued media analysis/covers, quality gates, lifecycle, and queued exports |
 
 The production human workbench is available at `/editor` after administrator
 login. It uses the approved native code-workbench shell with a live project
@@ -306,7 +314,7 @@ static header.
 - Voice model: [`FunAudioLLM/Fun-CosyVoice3-0.5B-2512`](https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512)
 - Revision: `29e01c4e8d000f4bcd70751be16fa94bf3d85a18`
 - Inference runtime: vendored [`FunAudioLLM/CosyVoice`](https://github.com/FunAudioLLM/CosyVoice) (CosyVoice3, not Qwen3-TTS)
-- Subtitles: vendored [`modelscope/FunClip`](https://github.com/modelscope/FunClip), stage-1 FunASR Paraformer only
+- Subtitles and recording transcription: vendored [`modelscope/FunClip`](https://github.com/modelscope/FunClip), stage-1 FunASR Paraformer only
 
 ## Security and responsible use
 
@@ -314,8 +322,8 @@ static header.
 - Preserve the exact reference transcript; do not bypass `confirm_rights`.
 - Keep voices, transcripts, generated media, SQLite data, tokens, credentials,
   model weights, caches, and environment files out of Git.
-- MCP reference audio and videos are restricted to their configured input
-  directories; symlinks and unsafe paths are rejected.
+- MCP reference audio, recordings, and videos are restricted to their configured
+  input directories; symlinks and unsafe paths are rejected.
 - The default `0.0.0.0:7860` bind is LAN-visible. For untrusted networks, bind
   to loopback or use an authenticated HTTPS reverse proxy and trusted-subnet
   filtering. Never expose this service directly to the public Internet.
@@ -329,6 +337,7 @@ Read [SECURITY.md](SECURITY.md) for the full threat model and reporting path.
 Configuration uses the `VWA_*` prefix. Common settings include
 `VWA_DATA_DIR`, `VWA_MODEL_DIR`, `VWA_COSYVOICE_ROOT`, `VWA_FUNCLIP_ROOT`,
 `VWA_HOST`, `VWA_PORT`, `VWA_VIDEO_INPUT_DIR`, `VWA_REFERENCE_INPUT_DIR`,
+`VWA_AUDIO_INPUT_DIR`,
 `VWA_VIDEO_PROJECTS_DIR`,
 `VWA_RECEIPT_KEY_FILE`,
 `VWA_XRY_TASK_ROOT`, `VWA_XRY_SOURCE_ROOT`, `VWA_XRY_RENDERER`, `VWA_XRY_PYTHON`,

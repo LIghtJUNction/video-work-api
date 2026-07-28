@@ -5,7 +5,7 @@
 **为用户、应用程序与 AI Agent 打造的自托管声音与字幕工作台。**
 
 在一个经过认证的 Rust 服务中，使用 CosyVoice3 进行授权零样本声音克隆，
-使用 FunClip 提取带时间码的视频字幕，并通过浏览器工作台完成日常操作。
+使用 FunClip stage-1 FunASR 提取带时间码的视频字幕和录音转写，并通过浏览器工作台完成日常操作。
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
@@ -35,6 +35,8 @@
   重命名项目，并通过一行或多行文案生成独立 WAV 文件。
 - **在同一服务中把视频转换为可用 SRT。** 提交沙箱目录路径或浏览器上传，
   获得带时间码的片段和可下载 SRT 文件。
+- **把录音文件直接转成文字。** 上传 WAV、MP3、AAC、M4A 或 FLAC，获得由
+  同一次 FunASR 识别直接派生的文本、时间码片段与 SRT。
 - **围绕授权与本地所有权设计。** 精确逐字稿、明确权利确认、私有 Token 和
   路径沙箱由服务端执行，而不是只依赖客户端约定。
 - **没有 Agent 也很好用。** 它首先是一个实用的本地工作台；MCP 提供自动化，
@@ -112,8 +114,10 @@ Token，以及一次性网页设置 Token。使用设置 Token 创建至少 12 �
 
 使用密码登录后可以注册 Passkey。WebAuthn 要求 HTTPS 域名；本地开发时
 `http://localhost:<端口>` 例外，但不支持 IP 字面量来源。管理员密码会保留为
-恢复登录方式。可通过 `./scripts/vwactl passwd`（源码安装）或
-`sudo vwactl passwd`（软件包安装）交互式重置。
+恢复登录方式。密码和 Passkey 登录会使用不透明的 `HttpOnly`、`SameSite=Strict`
+Cookie 让此设备最多保持登录 30 天，并与服务端过期时间一致；退出或重置密码会
+立即失效。可通过 `./scripts/vwactl passwd`（源码安装）或 `sudo vwactl passwd`
+（软件包安装）交互式重置。
 
 </details>
 
@@ -121,12 +125,14 @@ Token，以及一次性网页设置 Token。使用设置 Token 创建至少 12 �
 
 中英双语工作台提供：
 
-- 一次性初始化、管理员会话与可选 Passkey 登录；
+- 一次性初始化、最多 30 天的管理员设备会话与可选 Passkey 登录；
 - 新建、重命名说话人和音色，以及带约束的安全删除；
 - 浏览器麦克风录制或音频上传，并要求精确逐字稿和明确授权确认；
 - 批量生成语音（每个非空行生成一个 WAV）、试听、失败重试与易读文件名下载；
 - 从沙箱路径与本地上传批量提取字幕（每个文件最大 2 GiB），支持进度、
   重试、预览和 SRT 下载；
+- 批量上传 WAV、MP3、AAC、M4A 或 FLAC 录音文件转文字（最多 50 个），按顺序逐个
+  处理，支持逐项重试、时间码片段和 SRT；
 - 认证后的模型下载状态，以及管理员登录后用于配置 Codex 或 Claude Code 的
   **复制 Agent 提示词**流程，登录前不会暴露 Token。
 
@@ -138,18 +144,18 @@ Token，以及一次性网页设置 Token。使用设置 Token 创建至少 12 �
 
 | 接口 | 目标客户端 | 认证方式 | 浏览器来源策略 |
 |---|---|---|---|
-| `/api/*` 下的 REST | Web 工作台和应用程序集成 | 状态、一次性设置、密码登录和 Passkey 登录入口按设计公开；认证端点使用不透明的 `HttpOnly`、`SameSite=Strict` 管理员会话 | 非安全请求要求 `Origin` 的主机与端口匹配 `Host` |
+| `/api/*` 下的 REST | Web 工作台和应用程序集成 | 状态、一次性设置、密码登录和 Passkey 登录入口按设计公开；认证端点使用不透明的 `HttpOnly`、`SameSite=Strict` 管理员会话，最多 30 天，退出或重置密码会立即失效 | 非安全请求要求 `Origin` 的主机与端口匹配 `Host` |
 | `POST /mcp` 的 HTTP MCP | 可信 AI Agent | `Authorization: Bearer <VWA_MCP_TOKEN>` | Bearer 认证通过的 MCP 不受浏览器同源检查限制 |
 
 REST 涵盖初始化、登录/退出、Passkey、模型下载、说话人/音色管理、语音生成、
-经过认证的 WAV 获取和字幕提取。启动服务后可访问实时 `/docs` 页面查看精简
-端点参考。
+经过认证的 WAV 获取、视频字幕提取和录音转写。启动服务后可访问实时 `/docs`
+页面查看精简端点参考。
 
 ### `video_editor` MCP 工具
 
 | 工具 | 用途 |
 |---|---|
-| `video_editor` | 列出/创建工程、浏览并按 revision 编辑 `project.vpe`、规划抽帧/封面、计算安全切点、运行质量门禁、管理凭证与生命周期、分配变体 ID，以及导出/查询/取消队列任务 |
+| `video_editor` | 列出/创建工程、浏览并按 revision 编辑 `project.vpe`、转写沙箱录音、规划抽帧/封面、计算安全切点、运行质量门禁、管理凭证与生命周期、分配变体 ID，以及导出/查询/取消队列任务 |
 
 管理员登录后可访问生产版 `/editor`。界面采用已批准的原生代码工作台骨架与实时
 工程检查器：多个虚拟工程根、可展开目录树、标签页、带行号的纯文本编辑、解析后的
@@ -271,7 +277,7 @@ Token 默认保存在 `$VWA_DATA_DIR/mcp-token`，重启和升级后保持不变
 - 声音模型：[`FunAudioLLM/Fun-CosyVoice3-0.5B-2512`](https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512)
 - Revision：`29e01c4e8d000f4bcd70751be16fa94bf3d85a18`
 - 推理运行时：内置 [`FunAudioLLM/CosyVoice`](https://github.com/FunAudioLLM/CosyVoice)（CosyVoice3，不是 Qwen3-TTS）
-- 字幕：内置 [`modelscope/FunClip`](https://github.com/modelscope/FunClip)，仅 stage-1 FunASR Paraformer
+- 字幕与录音转写：内置 [`modelscope/FunClip`](https://github.com/modelscope/FunClip)，仅 stage-1 FunASR Paraformer
 
 ## 安全与负责任使用
 
@@ -279,7 +285,7 @@ Token 默认保存在 `$VWA_DATA_DIR/mcp-token`，重启和升级后保持不变
 - 保留精确参考逐字稿，不得绕过 `confirm_rights`。
 - 不要将声音、逐字稿、生成媒体、SQLite 数据、Token、凭据、模型权重、缓存
   和环境文件提交到 Git。
-- MCP 参考音频和视频受各自配置的输入目录限制；符号链接与不安全路径会被拒绝。
+- MCP 参考音频、录音和视频受各自配置的输入目录限制；符号链接与不安全路径会被拒绝。
 - 默认监听 `0.0.0.0:7860`，局域网可见。面对不可信网络时，请绑定回环地址，
   或使用带认证的 HTTPS 反向代理与可信子网过滤。切勿直接暴露到公网。
 - 安装过程不会启用服务，也不会修改防火墙规则。
@@ -291,7 +297,7 @@ Token 默认保存在 `$VWA_DATA_DIR/mcp-token`，重启和升级后保持不变
 
 配置变量使用 `VWA_*` 前缀。常用设置包括 `VWA_DATA_DIR`、`VWA_MODEL_DIR`、
 `VWA_COSYVOICE_ROOT`、`VWA_FUNCLIP_ROOT`、`VWA_HOST`、`VWA_PORT`、
-`VWA_VIDEO_INPUT_DIR`、`VWA_REFERENCE_INPUT_DIR`、`VWA_MCP_TOKEN_FILE`、
+`VWA_VIDEO_INPUT_DIR`、`VWA_AUDIO_INPUT_DIR`、`VWA_REFERENCE_INPUT_DIR`、`VWA_MCP_TOKEN_FILE`、
 `VWA_VIDEO_PROJECTS_DIR`、
 `VWA_RECEIPT_KEY_FILE`、
 `VWA_XRY_TASK_ROOT`、`VWA_XRY_SOURCE_ROOT`、`VWA_XRY_RENDERER`、`VWA_XRY_PYTHON`、

@@ -17,10 +17,15 @@ fn batch_workspaces_expose_queue_structure() {
         "subtitleProgress",
         "subtitleJobs",
         "retrySubtitleFailures",
+        "audioTranscriptionProgressText",
+        "audioTranscriptionProgress",
+        "audioTranscriptionJobs",
+        "retryAudioTranscriptionFailures",
     ] {
         assert!(INDEX.contains(&format!("id=\"{id}\"")), "missing #{id}");
     }
     assert!(INDEX.contains("name=\"video\" type=\"file\" multiple"));
+    assert!(INDEX.contains("name=\"audio\" type=\"file\" multiple"));
     assert!(INDEX.contains("id=\"profileSelect\" required aria-errormessage=\"generationError\""));
     assert!(INDEX.contains(
         "id=\"targetText\" name=\"target_text\" rows=\"7\" required aria-describedby=\"generationCount\" aria-errormessage=\"generationError\""
@@ -35,7 +40,7 @@ fn batch_workspaces_expose_queue_structure() {
         INDEX
             .matches("role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"")
             .count(),
-        2
+        3
     );
 }
 
@@ -43,9 +48,11 @@ fn batch_workspaces_expose_queue_structure() {
 fn batch_assets_are_loaded_in_order_with_matching_versions() {
     let core = INDEX.find("/static/batch-core.js?v=20260722e").unwrap();
     let prompt = INDEX.find("/static/agent-prompt.js?v=20260722-1").unwrap();
-    let app = INDEX.find("/static/app.js?v=20260724-translate").unwrap();
+    let app = INDEX
+        .find("/static/app.js?v=20260728-landing-session")
+        .unwrap();
     assert!(core < prompt && prompt < app);
-    assert!(INDEX.contains("/static/styles.css?v=20260726-logo"));
+    assert!(INDEX.contains("/static/styles.css?v=20260728-landing-session"));
 }
 
 #[test]

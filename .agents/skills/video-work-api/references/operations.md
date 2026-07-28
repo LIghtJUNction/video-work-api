@@ -93,6 +93,20 @@ path relative to that directory. FunClip stage-1 produces time-coded SRT segment
 Default FunClip root is `vendor/FunClip` when present; override with
 `VWA_FUNCLIP_ROOT`. First ASR run may download FunASR models.
 
+## Recording transcription (FunASR)
+
+Place recording files under `VWA_AUDIO_INPUT_DIR` (default
+`$VWA_DATA_DIR/audio`). `POST /api/audio/transcriptions` and the
+`video_editor` action `transcribe_audio` accept only a relative path inside
+that directory. Accepted formats exactly match the existing FunClip stage-1
+recording path: WAV, MP3, AAC, M4A, and FLAC. The authenticated browser flow
+selects up to 50 valid recordings and calls the unchanged
+single-file `POST /api/audio/transcriptions/upload` multipart `audio` endpoint
+sequentially, retaining per-file results and retries. All paths return the
+direct segment-derived `text`, time-coded `segments`,
+`srt`, and token `words` from the same Paraformer run; uploads are temporary
+and are removed by the server after the request completes.
+
 ## MCP for AI agents
 
 Clients POST JSON-RPC to `http://HOST:PORT/mcp` with `Authorization: Bearer
@@ -102,6 +116,9 @@ current trusted project's `.codex/config.toml` or global
 `~/.codex/config.toml`, then verifies the live MCP connection. Put
 agent-readable reference audio under `VWA_REFERENCE_INPUT_DIR` for
 `add_voice_profile`.
+
+Put agent-readable recordings under `VWA_AUDIO_INPUT_DIR` for
+`transcribe_audio`; this action never accepts arbitrary host paths.
 
 The public MCP surface is the single `video_editor` tool. Agents list projects,
 inspect their virtual trees, read and optimistically write `project.vpe`,
