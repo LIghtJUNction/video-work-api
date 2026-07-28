@@ -50,7 +50,7 @@ pkgver() {
     # v0.1.0-12-gabcdef0 -> 0.1.0.r12.gabcdef0
     printf '%s' "$_ver" | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
   elif _ver=$(git describe --long --always 2>/dev/null); then
-    printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    printf '0.1.0.r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
   else
     # Unborn / empty repo fallback (local test only)
     printf '0.1.0.r0.g%s' "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
