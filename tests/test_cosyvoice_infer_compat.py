@@ -30,6 +30,12 @@ class PkgResourcesCompatibilityTests(unittest.TestCase):
             compat = sys.modules["pkg_resources"]
             self.assertIsNone(compat.declare_namespace("lightning"))
             self.assertTrue(hasattr(compat.iter_entry_points("_vwa_missing_group"), "__next__"))
+            distribution = types.SimpleNamespace(version="0.3.4")
+            with patch.object(MODULE.importlib.metadata, "distribution", return_value=distribution) as lookup:
+                resolved = compat.get_distribution("pyworld")
+            self.assertIs(resolved, distribution)
+            self.assertEqual(resolved.version, "0.3.4")
+            lookup.assert_called_once_with("pyworld")
         finally:
             sys.modules.pop("pkg_resources", None)
             if original is not None:
