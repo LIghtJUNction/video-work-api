@@ -21,7 +21,7 @@ omegaconf==2.3.0
 onnx==1.22.0
 onnxruntime-gpu==1.18.0; sys_platform == 'linux'
 onnxruntime==1.18.0; sys_platform == 'darwin' or sys_platform == 'win32'
-setuptools==80.10.2
+setuptools==83.0.0
 # Must not upper-bound triton below the torch stack (20231117 required triton<3).
 openai-whisper==20250625
 protobuf>=4.25.0,<5
@@ -33,7 +33,7 @@ soundfile==0.12.1
 torch==2.3.1
 torchaudio==2.3.1
 transformers==5.5.0
-sentencepiece==0.2.0
+sentencepiece==0.2.1
 accelerate==1.6.0
 x-transformers==2.11.24
 wetext==0.0.4

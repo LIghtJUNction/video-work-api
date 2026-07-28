@@ -437,14 +437,14 @@ fn cmd_setup(settings: &Settings) -> Result<()> {
         vendor_req
     };
     if cosy_req.is_file() {
-        // The legacy whisper sdist imports pkg_resources without declaring setuptools.
+        // Build the Whisper sdist without isolation, so provide its setuptools backend first.
         let status = Command::new("uv")
             .args([
                 "pip",
                 "install",
                 "--python",
                 python.to_str().unwrap(),
-                "setuptools==80.10.2",
+                "setuptools==83.0.0",
             ])
             .status()
             .context("install legacy whisper build dependency")?;
