@@ -4,13 +4,36 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import sys
 import threading
+import types
 from pathlib import Path
 
 PROMPT_PREFIX = "You are a helpful assistant.<|endofprompt|>"
 _LOCK = threading.Lock()
 _MODEL = None
+
+
+def ensure_pkg_resources_compat() -> None:
+    """Supply only Lightning's removed pkg_resources APIs when it is absent.
+
+    setuptools 83 intentionally removed pkg_resources.  Keeping this shim local
+    avoids reviving that legacy package or weakening the pinned runtime.
+    """
+    try:
+        import pkg_resources  # noqa: F401
+    except ModuleNotFoundError as exc:
+        if exc.name != "pkg_resources":
+            raise
+        module = types.ModuleType("pkg_resources")
+        module.declare_namespace = lambda _package_name: None
+
+        def iter_entry_points(group: str, name: str | None = None):
+            return iter(importlib.metadata.entry_points().select(group=group, name=name))
+
+        module.iter_entry_points = iter_entry_points
+        sys.modules["pkg_resources"] = module
 
 
 def load_model(cosyvoice_root: Path, model_dir: Path):
@@ -36,6 +59,7 @@ def load_model(cosyvoice_root: Path, model_dir: Path):
         text = str(path)
         if text not in sys.path:
             sys.path.insert(0, text)
+    ensure_pkg_resources_compat()
     from cosyvoice.cli.cosyvoice import AutoModel
 
     _MODEL = AutoModel(
