@@ -32,7 +32,11 @@ def ensure_pkg_resources_compat() -> None:
         def iter_entry_points(group: str, name: str | None = None):
             return iter(importlib.metadata.entry_points().select(group=group, name=name))
 
+        def get_distribution(distribution_name: str):
+            return importlib.metadata.distribution(distribution_name)
+
         module.iter_entry_points = iter_entry_points
+        module.get_distribution = get_distribution
         sys.modules["pkg_resources"] = module
 
 
