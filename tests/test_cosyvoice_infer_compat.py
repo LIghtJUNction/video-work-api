@@ -54,6 +54,38 @@ class PkgResourcesCompatibilityTests(unittest.TestCase):
             else:
                 sys.modules["pkg_resources"] = original
 
+    def test_loading_model_does_not_disable_the_installed_text_frontend(self):
+        wetext = types.ModuleType("wetext")
+        onnxruntime = types.ModuleType("onnxruntime")
+        onnxruntime.InferenceSession = object
+        torch = types.ModuleType("torch")
+        torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+        cosyvoice = types.ModuleType("cosyvoice")
+        cosyvoice_cli = types.ModuleType("cosyvoice.cli")
+        cosyvoice_impl = types.ModuleType("cosyvoice.cli.cosyvoice")
+        expected_model = object()
+        cosyvoice_impl.AutoModel = lambda **_kwargs: expected_model
+
+        previous_model = MODULE._MODEL
+        MODULE._MODEL = None
+        try:
+            with patch.dict(
+                sys.modules,
+                {
+                    "wetext": wetext,
+                    "onnxruntime": onnxruntime,
+                    "torch": torch,
+                    "cosyvoice": cosyvoice,
+                    "cosyvoice.cli": cosyvoice_cli,
+                    "cosyvoice.cli.cosyvoice": cosyvoice_impl,
+                },
+            ):
+                model = MODULE.load_model(pathlib.Path("."), pathlib.Path("."))
+                self.assertIs(model, expected_model)
+                self.assertIs(sys.modules["wetext"], wetext)
+        finally:
+            MODULE._MODEL = previous_model
+
 
 if __name__ == "__main__":
     unittest.main()
