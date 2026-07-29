@@ -44,6 +44,9 @@ const translations = {
     generateTitle: "生成语音",
     generateLead: "每个非空行生成一个独立 WAV，最多 50 条。",
     voiceStyle: "说话人 / 语气",
+    generationMode: "生成模式",
+    generationModeZeroShot: "同语种克隆",
+    generationModeCrossLingual: "跨语言克隆",
     targetText: "目标文案（每个非空行一条）",
     speed: "语速",
     generateButton: "生成音频",
@@ -187,6 +190,9 @@ const translations = {
     generateTitle: "Generate speech",
     generateLead: "Each non-empty line creates a separate WAV, up to 50 items.",
     voiceStyle: "Speaker / style",
+    generationMode: "Generation mode",
+    generationModeZeroShot: "Same-language clone",
+    generationModeCrossLingual: "Cross-language clone",
     targetText: "Target text (one non-empty line per item)",
     speed: "Speed",
     generateButton: "Generate audio",
@@ -1425,6 +1431,7 @@ function updateBatchProgress(kind, jobs) {
 function setGenerationControlsDisabled(disabled) {
   [
     $("#profileSelect"),
+    $("#generationMode"),
     $("#targetText"),
     $("#speed"),
     $("#generateButton"),
@@ -1580,6 +1587,7 @@ async function startGeneration(items) {
   }
   const [speaker_id, profile_id] = profile.split("|");
   const speedSnapshot = Number($("#speed")?.value || 1);
+  const generation_mode = $("#generationMode")?.value || "zero_shot";
   setGenerationError("");
   generationEpoch += 1;
   generationJobs = items.map((text) => ({
@@ -1587,7 +1595,13 @@ async function startGeneration(items) {
     status: "pending",
     error: "",
     result: null,
-    request: { speaker_id, profile_id, target_text: text, speed: speedSnapshot },
+    request: {
+      speaker_id,
+      profile_id,
+      target_text: text,
+      speed: speedSnapshot,
+      generation_mode,
+    },
   }));
   renderGenerationJobs();
   notice("");

@@ -5,14 +5,34 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 
-/// Trait for zero-shot speech generation backends.
+/// CosyVoice inference mode. Zero-shot remains the compatibility default.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerationMode {
+    #[default]
+    ZeroShot,
+    CrossLingual,
+}
+
+impl GenerationMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ZeroShot => "zero_shot",
+            Self::CrossLingual => "cross_lingual",
+        }
+    }
+}
+
+/// Trait for CosyVoice speech generation backends.
 pub trait SpeechEngine: Send + Sync {
     fn loaded(&self) -> bool;
     fn generate(
         &self,
         target_text: &str,
         speed: f64,
+        generation_mode: GenerationMode,
         prompt_text: &str,
         prompt_wav: &Path,
         output_path: &Path,
@@ -55,6 +75,7 @@ impl SpeechEngine for CosyVoiceEngine {
         &self,
         target_text: &str,
         speed: f64,
+        generation_mode: GenerationMode,
         prompt_text: &str,
         prompt_wav: &Path,
         output_path: &Path,
@@ -88,6 +109,8 @@ impl SpeechEngine for CosyVoiceEngine {
                 output_path.to_str().context("output utf-8")?,
                 "--speed",
                 &speed.to_string(),
+                "--generation-mode",
+                generation_mode.as_str(),
             ])
             .status()
             .context("spawn cosyvoice helper")?;
@@ -102,7 +125,7 @@ impl SpeechEngine for CosyVoiceEngine {
 /// Test / dry-run engine that writes silence.
 pub struct FakeEngine {
     pub loaded_flag: AtomicBool,
-    pub calls: Mutex<Vec<(String, f64, String, PathBuf)>>,
+    pub calls: Mutex<Vec<(String, f64, GenerationMode, String, PathBuf)>>,
     delay: Option<Duration>,
 }
 
@@ -131,6 +154,7 @@ impl SpeechEngine for FakeEngine {
         &self,
         target_text: &str,
         speed: f64,
+        generation_mode: GenerationMode,
         prompt_text: &str,
         prompt_wav: &Path,
         output_path: &Path,
@@ -141,11 +165,27 @@ impl SpeechEngine for FakeEngine {
         self.calls.lock().unwrap().push((
             target_text.to_string(),
             speed,
+            generation_mode,
             prompt_text.to_string(),
             prompt_wav.to_path_buf(),
         ));
         crate::audio::write_silent_wav(output_path, 0.1, 24_000)?;
         self.loaded_flag.store(true, Ordering::Relaxed);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GenerationMode;
+
+    #[test]
+    fn generation_mode_is_strict_and_defaults_to_zero_shot() {
+        assert_eq!(GenerationMode::default(), GenerationMode::ZeroShot);
+        assert_eq!(
+            serde_json::from_str::<GenerationMode>("\"cross_lingual\"").unwrap(),
+            GenerationMode::CrossLingual
+        );
+        assert!(serde_json::from_str::<GenerationMode>("\"unsupported\"").is_err());
     }
 }

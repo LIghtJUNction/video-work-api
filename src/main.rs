@@ -731,11 +731,15 @@ async fn cmd_serve(mut settings: Settings) -> Result<()> {
         &settings.project_root,
     ));
     let cancellation = Arc::new(AtomicBool::new(false));
-    let subtitles: Arc<dyn SubtitleExtractor> = Arc::new(FunClipExtractor::with_cancellation(
-        settings.funclip_root.clone(),
-        settings.subtitle_timeout_seconds,
-        cancellation.clone(),
-    ));
+    let subtitle_python = resolve_python(&settings).unwrap_or_else(|| PathBuf::from("python3"));
+    let subtitles: Arc<dyn SubtitleExtractor> = Arc::new(
+        FunClipExtractor::with_python_and_cancellation(
+            settings.funclip_root.clone(),
+            settings.subtitle_timeout_seconds,
+            subtitle_python,
+            cancellation.clone(),
+        ),
+    );
     let translation: Arc<dyn TranslationEngine> = Arc::new(MadladEngine::new(
         settings.translation_model_dir.clone(),
         &settings.project_root,

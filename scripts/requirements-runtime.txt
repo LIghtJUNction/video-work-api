@@ -32,7 +32,8 @@ rich==13.7.1
 soundfile==0.12.1
 torch==2.3.1
 torchaudio==2.3.1
-transformers==5.5.0
+# CosyVoice3 supports the 4.x API through 4.51.3; FunClip requires <5.
+transformers==4.51.3
 sentencepiece==0.2.1
 accelerate==1.6.0
 x-transformers==2.11.24

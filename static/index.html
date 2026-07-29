@@ -75,6 +75,7 @@
         <div class="section-heading"><div><p class="eyebrow" data-i18n="generateEyebrow">GENERATE</p><h2 data-i18n="generateTitle">生成语音</h2><p class="section-lead" data-i18n="generateLead">选择音色，输入文案，马上试听结果。</p></div><span class="section-number">01</span></div>
         <form id="generateForm">
           <label><span data-i18n="voiceStyle">说话人 / 语气</span><select id="profileSelect" required aria-errormessage="generationError"></select></label>
+          <label><span data-i18n="generationMode">生成模式</span><select id="generationMode" name="generation_mode"><option value="zero_shot" data-i18n="generationModeZeroShot">同语种克隆</option><option value="cross_lingual" data-i18n="generationModeCrossLingual">跨语言克隆</option></select></label>
           <label><span data-i18n="targetText">目标文案（每个非空行一条）</span><textarea id="targetText" name="target_text" rows="7" required aria-describedby="generationCount" aria-errormessage="generationError"></textarea></label>
           <div class="batch-toolbar"><span id="generationCount" class="batch-count"></span><span id="generationError" class="field-error" role="alert"></span></div>
           <label><span><span data-i18n="speed">语速</span> <output id="speedValue">1.00×</output></span><input id="speed" name="speed" type="range" min="0.75" max="1.25" step="0.05" value="1"></label>

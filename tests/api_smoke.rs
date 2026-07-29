@@ -1,7 +1,7 @@
 //! HTTP smoke tests with a fake speech engine.
 
 use std::fs;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
@@ -18,7 +18,7 @@ use video_work_api::http::{build_router, AppState, LoginLimiter};
 use video_work_api::model::ModelDownloadRegistry;
 use video_work_api::passkeys::CeremonyStore;
 use video_work_api::studio::Studio;
-use video_work_api::subtitles::{FakeSubtitles, SubtitleExtractor, SubtitleSegment};
+use video_work_api::subtitles::{AsrModel, FakeSubtitles, SubtitleExtractor, SubtitleSegment};
 use video_work_api::translation::FakeTranslationEngine;
 
 struct FailingSubtitles;
@@ -31,8 +31,39 @@ impl SubtitleExtractor for FailingSubtitles {
     fn extract(
         &self,
         _path: &std::path::Path,
+        _model: AsrModel,
     ) -> anyhow::Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
         anyhow::bail!("fake FunClip failure")
+    }
+}
+
+/// Test-only extractor that records the ASR selection without retaining media
+/// paths or contents.
+struct RecordingSubtitles {
+    models: Arc<Mutex<Vec<AsrModel>>>,
+}
+
+impl SubtitleExtractor for RecordingSubtitles {
+    fn ready(&self) -> bool {
+        true
+    }
+
+    fn extract(
+        &self,
+        _path: &std::path::Path,
+        model: AsrModel,
+    ) -> anyhow::Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
+        self.models.lock().unwrap().push(model);
+        Ok((
+            vec![SubtitleSegment {
+                index: 1,
+                start: "00:00:00.000".into(),
+                end: "00:00:01.000".into(),
+                text: "recorded".into(),
+            }],
+            "1\n00:00:00,000 --> 00:00:01,000\nrecorded\n".into(),
+            Vec::new(),
+        ))
     }
 }
 
@@ -253,6 +284,58 @@ async fn setup_login_and_status() {
         .await
         .unwrap();
     assert_eq!(body_json(res).await["authenticated"], false);
+}
+
+#[tokio::test]
+async fn generation_request_rejects_unknown_fields_and_modes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("static")).unwrap();
+    fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
+    let settings = test_settings(root);
+    settings.create_data_dirs().unwrap();
+    let db = Database::open(settings.database_path()).unwrap();
+    db.create_session(&video_work_api::security::token_hash("generation-session"))
+        .unwrap();
+    let studio = Arc::new(Studio::new(
+        settings,
+        db,
+        Arc::new(FakeEngine::new()),
+        Arc::new(FakeSubtitles::default()),
+        Arc::new(FakeTranslationEngine::new()),
+    ));
+    let app = build_router(AppState {
+        studio,
+        limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
+    });
+
+    for body in [
+        r#"{"speaker_id":"speaker","profile_id":"profile","target_text":"Hello","unexpected":true}"#,
+        r#"{"speaker_id":"speaker","profile_id":"profile","target_text":"Hello","generation_mode":"unsupported"}"#,
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/generations")
+                    .header("host", "testserver")
+                    .header("origin", "http://testserver")
+                    .header("cookie", "vwa_session=generation-session")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body_json(response).await["error"]["code"],
+            "invalid_request"
+        );
+    }
 }
 
 #[test]
@@ -1465,6 +1548,89 @@ async fn subtitle_upload_requires_auth_extracts_and_cleans_up() {
 }
 
 #[tokio::test]
+async fn audio_transcription_forwards_requested_asr_model_to_extractor() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("static")).unwrap();
+    fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
+    let settings = test_settings(root);
+    settings.create_data_dirs().unwrap();
+    fs::write(settings.audio_input_dir.join("meeting.m4a"), b"fake recording").unwrap();
+    let db = Database::open(settings.database_path()).unwrap();
+    db.set_admin(&video_work_api::security::hash_password("correct horse battery staple").unwrap())
+        .unwrap();
+    let selected_models = Arc::new(Mutex::new(Vec::new()));
+    let studio = Arc::new(Studio::new(
+        settings,
+        db,
+        Arc::new(FakeEngine::new()),
+        Arc::new(RecordingSubtitles {
+            models: selected_models.clone(),
+        }),
+        Arc::new(FakeTranslationEngine::new()),
+    ));
+    let app = build_router(AppState {
+        studio,
+        limiter: Arc::new(LoginLimiter::new()),
+        passkey_ceremonies: Arc::new(CeremonyStore::new()),
+        model_downloads: Arc::new(ModelDownloadRegistry::new()),
+    });
+
+    let login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"password":"correct horse battery staple"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+    let cookie = login
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    for body in [
+        r#"{"audio_path":"meeting.m4a"}"#,
+        r#"{"audio_path":"meeting.m4a","asr_model":"sensevoice"}"#,
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/audio/transcriptions")
+                    .header("host", "testserver")
+                    .header("origin", "http://testserver")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    assert_eq!(
+        *selected_models.lock().unwrap(),
+        vec![AsrModel::Paraformer, AsrModel::SenseVoice]
+    );
+}
+
+#[tokio::test]
 async fn audio_transcription_requires_auth_sandboxes_and_cleans_uploads() {
     let dir = tempdir().unwrap();
     let root = dir.path();
@@ -1607,6 +1773,49 @@ async fn audio_transcription_requires_auth_sandboxes_and_cleans_uploads() {
     assert_eq!(json["segments"][0]["text"], "hello world");
     assert!(json["srt"].as_str().unwrap().contains("hello world"));
     assert!(json["words"].is_array());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/audio/transcriptions")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"audio_path":"meeting.m4a","asr_model":"sensevoice"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_json(response).await["text"], "hello world");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/audio/transcriptions")
+                .header("host", "testserver")
+                .header("origin", "http://testserver")
+                .header("cookie", &cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"audio_path":"meeting.m4a","asr_model":"unsupported"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body_json(response).await["error"]["code"],
+        "invalid_request"
+    );
 
     let response = app
         .clone()

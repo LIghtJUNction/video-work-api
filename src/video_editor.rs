@@ -10,8 +10,10 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::database::{PendingVideoProjectWrite, VideoProjectRow};
+use crate::engine::GenerationMode;
 use crate::render_queue;
 use crate::studio::{Studio, StudioError};
+use crate::subtitles::AsrModel;
 use crate::vpe::{self, VpeDocument};
 use crate::{
     alignment, cover, lifecycle, provenance, quality, sampling, target_text_is_valid, timeline,
@@ -68,6 +70,8 @@ pub enum VideoEditorRequest {
         target_text: String,
         #[serde(default = "default_speed")]
         speed: f64,
+        #[serde(default)]
+        generation_mode: GenerationMode,
     },
     GetGeneration {
         generation_id: String,
@@ -77,6 +81,8 @@ pub enum VideoEditorRequest {
     },
     TranscribeAudio {
         audio_path: String,
+        #[serde(default)]
+        asr_model: AsrModel,
     },
     ListTranslationLanguages {},
     Translate {
@@ -189,6 +195,7 @@ fn map_studio_editor(error: anyhow::Error) -> EditorError {
             | StudioError::NameConflict
             | StudioError::ProfileInUse
             | StudioError::ProfileFileInvalid => EditorError::Conflict(error.to_string()),
+            StudioError::GenerationFailed => EditorError::Internal(anyhow!(error.to_string())),
             _ => EditorError::Invalid(error.to_string()),
         };
     }
@@ -243,6 +250,7 @@ pub fn execute(studio: &Studio, request: VideoEditorRequest) -> Result<Value, Ed
             profile_id,
             target_text,
             speed,
+            generation_mode,
         } => {
             let text = target_text.trim();
             if !target_text_is_valid(text) {
@@ -256,7 +264,7 @@ pub fn execute(studio: &Studio, request: VideoEditorRequest) -> Result<Value, Ed
                 ));
             }
             studio
-                .generate_speech(&speaker_id, &profile_id, text, speed)
+                .generate_speech(&speaker_id, &profile_id, text, speed, generation_mode)
                 .map_err(map_studio_editor)
         }
         VideoEditorRequest::GetGeneration { generation_id } => studio
@@ -265,8 +273,11 @@ pub fn execute(studio: &Studio, request: VideoEditorRequest) -> Result<Value, Ed
         VideoEditorRequest::ExtractVideoSubtitles { video_path } => studio
             .extract_subtitles(&video_path)
             .map_err(map_studio_editor),
-        VideoEditorRequest::TranscribeAudio { audio_path } => studio
-            .transcribe_audio(&audio_path)
+        VideoEditorRequest::TranscribeAudio {
+            audio_path,
+            asr_model,
+        } => studio
+            .transcribe_audio(&audio_path, asr_model)
             .map_err(map_studio_editor),
         VideoEditorRequest::ListTranslationLanguages {} => {
             Ok(studio.list_translation_languages())
@@ -1675,6 +1686,10 @@ mod tests {
     use crate::translation::FakeTranslationEngine;
 
     fn studio(root: &Path) -> Studio {
+        studio_with_engine(root, Arc::new(FakeEngine::new()))
+    }
+
+    fn studio_with_engine(root: &Path, engine: Arc<FakeEngine>) -> Studio {
         let settings = Settings {
             data_dir: root.to_path_buf(),
             model_dir: root.join("model"),
@@ -1710,10 +1725,142 @@ mod tests {
         Studio::new(
             settings,
             Database::open(root.join("studio.sqlite3")).unwrap(),
-            Arc::new(FakeEngine::new()),
+            engine,
             Arc::new(FakeSubtitles::default()),
             Arc::new(FakeTranslationEngine::new()),
         )
+    }
+
+    #[test]
+    fn generate_speech_mode_defaults_and_rejects_unknown_values() {
+        let request: VideoEditorRequest = serde_json::from_value(serde_json::json!({
+            "action": "generate_speech",
+            "speaker_id": "speaker",
+            "profile_id": "profile",
+            "target_text": "Hello"
+        }))
+        .unwrap();
+        assert!(matches!(
+            request,
+            VideoEditorRequest::GenerateSpeech {
+                generation_mode: GenerationMode::ZeroShot,
+                ..
+            }
+        ));
+
+        let request: VideoEditorRequest = serde_json::from_value(serde_json::json!({
+            "action": "generate_speech",
+            "speaker_id": "speaker",
+            "profile_id": "profile",
+            "target_text": "Привет",
+            "generation_mode": "cross_lingual"
+        }))
+        .unwrap();
+        assert!(matches!(
+            request,
+            VideoEditorRequest::GenerateSpeech {
+                generation_mode: GenerationMode::CrossLingual,
+                ..
+            }
+        ));
+        assert!(
+            serde_json::from_value::<VideoEditorRequest>(serde_json::json!({
+                "action": "generate_speech",
+                "speaker_id": "speaker",
+                "profile_id": "profile",
+                "target_text": "Hello",
+                "generation_mode": "unsupported"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn transcription_asr_model_defaults_and_rejects_unknown_values() {
+        let request: VideoEditorRequest = serde_json::from_value(serde_json::json!({
+            "action": "transcribe_audio",
+            "audio_path": "recording.wav"
+        }))
+        .unwrap();
+        assert!(matches!(
+            request,
+            VideoEditorRequest::TranscribeAudio {
+                asr_model: AsrModel::Paraformer,
+                ..
+            }
+        ));
+
+        let request: VideoEditorRequest = serde_json::from_value(serde_json::json!({
+            "action": "transcribe_audio",
+            "audio_path": "recording.wav",
+            "asr_model": "sensevoice"
+        }))
+        .unwrap();
+        assert!(matches!(
+            request,
+            VideoEditorRequest::TranscribeAudio {
+                asr_model: AsrModel::SenseVoice,
+                ..
+            }
+        ));
+        assert!(
+            serde_json::from_value::<VideoEditorRequest>(serde_json::json!({
+                "action": "transcribe_audio",
+                "audio_path": "recording.wav",
+                "asr_model": "unsupported"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn generation_failures_are_internal_errors() {
+        let mapped = map_studio_editor(StudioError::GenerationFailed.into());
+        assert!(matches!(mapped, EditorError::Internal(_)));
+
+        let mapped = map_studio_editor(StudioError::InvalidProfile.into());
+        assert!(matches!(mapped, EditorError::Invalid(_)));
+    }
+
+    #[test]
+    fn generate_speech_execution_passes_cross_lingual_mode_to_engine() {
+        let directory = tempdir().unwrap();
+        let engine = Arc::new(FakeEngine::new());
+        let studio = studio_with_engine(directory.path(), engine.clone());
+        studio
+            .database
+            .insert_speaker("speaker", "Speaker")
+            .unwrap();
+        let audio_name = "00000000-0000-4000-8000-000000000001.wav";
+        let prompt_wav = studio.settings.profiles_dir().join(audio_name);
+        crate::audio::write_silent_wav(&prompt_wav, 0.1, 24_000).unwrap();
+        studio
+            .database
+            .insert_profile(
+                "profile",
+                "speaker",
+                "Neutral",
+                "Exact reference transcript",
+                audio_name,
+                5.0,
+            )
+            .unwrap();
+
+        execute(
+            &studio,
+            VideoEditorRequest::GenerateSpeech {
+                speaker_id: "speaker".into(),
+                profile_id: "profile".into(),
+                target_text: "Привет, мир".into(),
+                speed: 1.0,
+                generation_mode: GenerationMode::CrossLingual,
+            },
+        )
+        .unwrap();
+
+        let calls = engine.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].2, GenerationMode::CrossLingual);
     }
 
     fn export_project() -> &'static str {

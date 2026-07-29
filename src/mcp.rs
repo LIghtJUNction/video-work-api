@@ -86,7 +86,13 @@ pub fn tool_specs() -> Value {
                             "speaker_id": { "type": "string" },
                             "profile_id": { "type": "string" },
                             "target_text": { "type": "string" },
-                            "speed": { "type": "number", "minimum": 0.75, "maximum": 1.25 }
+                            "speed": { "type": "number", "minimum": 0.75, "maximum": 1.25 },
+                            "generation_mode": {
+                                "type": "string",
+                                "enum": ["zero_shot", "cross_lingual"],
+                                "default": "zero_shot",
+                                "description": "Use cross_lingual when the target text language differs from the reference audio."
+                            }
                         }),
                         &["speaker_id", "profile_id", "target_text"]
                     ),
@@ -106,6 +112,12 @@ pub fn tool_specs() -> Value {
                             "audio_path": {
                                 "type": "string",
                                 "description": "Relative WAV, MP3, AAC, M4A, or FLAC path under VWA_AUDIO_INPUT_DIR."
+                            },
+                            "asr_model": {
+                                "type": "string",
+                                "enum": ["paraformer", "sensevoice"],
+                                "default": "paraformer",
+                                "description": "Use sensevoice for multilingual recording transcription; Paraformer remains the default."
                             }
                         }),
                         &["audio_path"]
@@ -500,6 +512,48 @@ mod tests {
                 "cleanup_intermediates",
                 "archive_completed_sources",
             ]
+        );
+    }
+
+    #[test]
+    fn generate_speech_schema_exposes_cross_lingual_mode() {
+        let specs = tool_specs();
+        let generation = specs[0]["inputSchema"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|schema| {
+                schema["properties"]["action"]["const"].as_str() == Some("generate_speech")
+            })
+            .unwrap();
+        assert_eq!(
+            generation["properties"]["generation_mode"]["enum"],
+            serde_json::json!(["zero_shot", "cross_lingual"])
+        );
+        assert_eq!(
+            generation["properties"]["generation_mode"]["default"],
+            "zero_shot"
+        );
+    }
+
+    #[test]
+    fn transcription_schema_exposes_opt_in_sensevoice() {
+        let specs = tool_specs();
+        let transcription = specs[0]["inputSchema"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|schema| {
+                schema["properties"]["action"]["const"].as_str() == Some("transcribe_audio")
+            })
+            .unwrap();
+        assert_eq!(
+            transcription["properties"]["asr_model"]["enum"],
+            serde_json::json!(["paraformer", "sensevoice"])
+        );
+        assert_eq!(
+            transcription["properties"]["asr_model"]["default"],
+            "paraformer"
         );
     }
 }

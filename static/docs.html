@@ -153,7 +153,7 @@
           <span><code class="method post">POST</code></span>
           <span><code>/api/generations</code></span>
           <span data-i18n="authSession">会话</span>
-          <span data-i18n="descGenerate">JSON <code>{speaker_id, profile_id, target_text, speed}</code>；speed 0.75–1.25；文案 ≤ 1200 字符。</span>
+          <span data-i18n="descGenerate">JSON <code>{speaker_id, profile_id, target_text, speed, generation_mode}</code>；generation_mode 为 <code>zero_shot</code>（默认）或 <code>cross_lingual</code>；跨语言时选后者；speed 0.75–1.25；文案 ≤ 1200 字符。</span>
         </div>
         <div class="endpoint-row" role="row">
           <span><code class="method get">GET</code></span>
@@ -337,7 +337,7 @@
         descAddProfile: "multipart：audio、style_name、prompt_text、consent=true。参考音 5–30 秒。",
         descRenameProfile: "JSON {style_name}，同一说话人下唯一。",
         descDelProfile: "删除未占用的参考档案。",
-        descGenerate: "JSON {speaker_id, profile_id, target_text, speed}；speed 0.75–1.25；文案 ≤ 1200 字符。",
+        descGenerate: "JSON {speaker_id, profile_id, target_text, speed, generation_mode}；generation_mode 为 zero_shot（默认）或 cross_lingual；跨语言时选后者；speed 0.75–1.25；文案 ≤ 1200 字符。",
         descAudio: "返回 WAV 音频。",
         descSubtitles: "JSON {video_path} 相对于 VWA_VIDEO_INPUT_DIR；返回 {segments, srt}。",
         descSubtitlesUpload:
@@ -412,7 +412,7 @@
         descAddProfile: "multipart: audio, style_name, prompt_text, consent=true. Reference audio 5–30s.",
         descRenameProfile: "JSON {style_name}; unique per speaker.",
         descDelProfile: "Delete an unused profile.",
-        descGenerate: "JSON {speaker_id, profile_id, target_text, speed}; speed 0.75–1.25; text ≤ 1200 chars.",
+        descGenerate: "JSON {speaker_id, profile_id, target_text, speed, generation_mode}; generation_mode is zero_shot (default) or cross_lingual; use cross_lingual for another target language; speed 0.75–1.25; text ≤ 1200 chars.",
         descAudio: "Authenticated WAV response.",
         descSubtitles: "JSON {video_path} under VWA_VIDEO_INPUT_DIR; returns {segments, srt}.",
         descSubtitlesUpload:

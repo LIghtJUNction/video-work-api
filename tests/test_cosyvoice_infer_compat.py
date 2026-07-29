@@ -87,5 +87,64 @@ class PkgResourcesCompatibilityTests(unittest.TestCase):
             MODULE._MODEL = previous_model
 
 
+class InferenceModeTests(unittest.TestCase):
+    class _Speech:
+        def detach(self):
+            return self
+
+        def cpu(self):
+            return self
+
+    class _Model:
+        def __init__(self):
+            self.calls = []
+
+        def inference_zero_shot(self, *args, **kwargs):
+            self.calls.append(("zero_shot", args, kwargs))
+            return [{"tts_speech": InferenceModeTests._Speech()}]
+
+        def inference_cross_lingual(self, *args, **kwargs):
+            self.calls.append(("cross_lingual", args, kwargs))
+            return [{"tts_speech": InferenceModeTests._Speech()}]
+
+    def _args(self, generation_mode):
+        return types.SimpleNamespace(
+            generation_mode=generation_mode,
+            target_text="Russian target text",
+            prompt_text="Exact Chinese reference transcript",
+            prompt_wav=pathlib.Path("reference.wav"),
+            speed=1.1,
+        )
+
+    def test_zero_shot_keeps_prompt_transcript_and_text_frontend(self):
+        model = self._Model()
+        chunks = MODULE.inference_chunks(model, self._args("zero_shot"))
+        self.assertEqual(len(chunks), 1)
+        mode, args, kwargs = model.calls[0]
+        self.assertEqual(mode, "zero_shot")
+        self.assertEqual(
+            args,
+            (
+                "Russian target text",
+                MODULE.PROMPT_PREFIX + "Exact Chinese reference transcript",
+                "reference.wav",
+            ),
+        )
+        self.assertEqual(kwargs, {"stream": False, "speed": 1.1, "text_frontend": True})
+
+    def test_cross_lingual_omits_prompt_transcript_and_text_frontend(self):
+        model = self._Model()
+        chunks = MODULE.inference_chunks(model, self._args("cross_lingual"))
+        self.assertEqual(len(chunks), 1)
+        mode, args, kwargs = model.calls[0]
+        self.assertEqual(mode, "cross_lingual")
+        self.assertEqual(
+            args,
+            (MODULE.PROMPT_PREFIX + "Russian target text", "reference.wav"),
+        )
+        self.assertNotIn("Exact Chinese reference transcript", args)
+        self.assertEqual(kwargs, {"stream": False, "speed": 1.1})
+
+
 if __name__ == "__main__":
     unittest.main()
