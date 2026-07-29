@@ -58,7 +58,6 @@ def load_model(cosyvoice_root: Path, model_dir: Path):
 
         onnxruntime.InferenceSession = cpu_session
         onnxruntime._vwa_cpu_sessions = True
-    sys.modules["wetext"] = None
     for path in (cosyvoice_root, cosyvoice_root / "third_party" / "Matcha-TTS"):
         text = str(path)
         if text not in sys.path:
