@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zero-shot CosyVoice3 inference helper invoked by the Rust engine."""
+"""CosyVoice3 zero-shot and cross-lingual inference helper for the Rust engine."""
 
 from __future__ import annotations
 
@@ -74,6 +74,32 @@ def load_model(cosyvoice_root: Path, model_dir: Path):
     return _MODEL
 
 
+def inference_chunks(model, args):
+    """Run the selected CosyVoice API without mixing in a foreign transcript."""
+    if args.generation_mode == "zero_shot":
+        results = model.inference_zero_shot(
+            args.target_text,
+            PROMPT_PREFIX + args.prompt_text,
+            str(args.prompt_wav),
+            stream=False,
+            speed=args.speed,
+            text_frontend=True,
+        )
+    else:
+        results = model.inference_cross_lingual(
+            PROMPT_PREFIX + args.target_text,
+            str(args.prompt_wav),
+            stream=False,
+            speed=args.speed,
+        )
+    chunks = []
+    for item in results:
+        speech = item.get("tts_speech")
+        if speech is not None:
+            chunks.append(speech.detach().cpu())
+    return chunks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cosyvoice-root", type=Path, required=True)
@@ -83,6 +109,11 @@ def main() -> int:
     parser.add_argument("--prompt-wav", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--speed", type=float, default=1.0)
+    parser.add_argument(
+        "--generation-mode",
+        choices=("zero_shot", "cross_lingual"),
+        default="zero_shot",
+    )
     args = parser.parse_args()
 
     with _LOCK:
@@ -92,18 +123,7 @@ def main() -> int:
         from cosyvoice.utils.common import set_all_random_seed
 
         set_all_random_seed(42)
-        chunks = []
-        for item in model.inference_zero_shot(
-            args.target_text,
-            PROMPT_PREFIX + args.prompt_text,
-            str(args.prompt_wav),
-            stream=False,
-            speed=args.speed,
-            text_frontend=True,
-        ):
-            speech = item.get("tts_speech")
-            if speech is not None:
-                chunks.append(speech.detach().cpu())
+        chunks = inference_chunks(model, args)
         if not chunks:
             raise SystemExit("CosyVoice produced no audio")
         samples = torch.cat(chunks, dim=1).squeeze(0).numpy()

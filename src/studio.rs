@@ -9,12 +9,14 @@ use uuid::Uuid;
 use crate::audio::{self, convert_reference, validate_generated_wav, MAX_UPLOAD_BYTES};
 use crate::config::Settings;
 use crate::database::Database;
-use crate::engine::SpeechEngine;
+use crate::engine::{GenerationMode, SpeechEngine};
 use crate::model::{
     model_files_present, model_kind_files_present, translation_model_files_present, ModelKind,
 };
 use crate::paths::{resolve_under_root, safe_owned_file};
-use crate::subtitles::{audio_transcription_extension_allowed, SubtitleExtractor, SubtitleSegment};
+use crate::subtitles::{
+    audio_transcription_extension_allowed, AsrModel, SubtitleExtractor, SubtitleSegment,
+};
 use crate::translation::{
     self, languages_payload, TranslationEngine, MAX_TRANSLATE_SEGMENTS, MAX_TRANSLATE_TEXT_CHARS,
     MAX_TRANSLATE_TOTAL_CHARS,
@@ -360,6 +362,7 @@ impl Studio {
         profile_id: &str,
         target_text: &str,
         speed: f64,
+        generation_mode: GenerationMode,
     ) -> Result<Value> {
         let profile = self
             .database
@@ -386,6 +389,7 @@ impl Studio {
             self.engine.generate(
                 target_text,
                 speed,
+                generation_mode,
                 &profile.prompt_text,
                 &prompt_wav,
                 &temporary,
@@ -412,6 +416,7 @@ impl Studio {
                 "audio_url": format!("/api/generations/{generation_id}/audio"),
                 "audio_path": destination,
                 "download_name": crate::filenames::download_name_from_text(target_text),
+                "generation_mode": generation_mode,
                 "audio": metadata,
             }))
         })();
@@ -456,7 +461,7 @@ impl Studio {
         let root = self.settings.video_input_dir.as_path();
         let video_path = resolve_under_root(video_path_raw, root)
             .ok_or_else(|| anyhow!("Video must be inside the configured video input directory"))?;
-        let (segments, srt, words) = self.subtitles.extract(&video_path)?;
+        let (segments, srt, words) = self.subtitles.extract(&video_path, AsrModel::Paraformer)?;
         Ok(json!({
             "segments": segments,
             "srt": srt,
@@ -467,7 +472,7 @@ impl Studio {
     /// Extract subtitles from a server-created upload temp file (already trusted,
     /// so the video_input_dir sandbox does not apply).
     pub fn extract_subtitles_from_upload(&self, video_path: &Path) -> Result<Value> {
-        let (segments, srt, words) = self.subtitles.extract(video_path)?;
+        let (segments, srt, words) = self.subtitles.extract(video_path, AsrModel::Paraformer)?;
         Ok(json!({
             "segments": segments,
             "srt": srt,
@@ -476,7 +481,7 @@ impl Studio {
     }
 
     /// Transcribe a recording kept under the dedicated recording input root.
-    pub fn transcribe_audio(&self, audio_path_raw: &str) -> Result<Value> {
+    pub fn transcribe_audio(&self, audio_path_raw: &str, model: AsrModel) -> Result<Value> {
         let raw_path = Path::new(audio_path_raw);
         if raw_path.is_absolute()
             || raw_path
@@ -488,20 +493,20 @@ impl Studio {
         let audio_path =
             resolve_under_root(audio_path_raw, self.settings.audio_input_dir.as_path())
                 .ok_or(StudioError::InvalidAudioTranscriptionPath)?;
-        self.transcribe_audio_file(&audio_path)
+        self.transcribe_audio_file(&audio_path, model)
     }
 
     /// Transcribe a server-created temporary upload after its extension has
     /// been retained in the generated filename.
     pub fn transcribe_audio_from_upload(&self, audio_path: &Path) -> Result<Value> {
-        self.transcribe_audio_file(audio_path)
+        self.transcribe_audio_file(audio_path, AsrModel::Paraformer)
     }
 
-    fn transcribe_audio_file(&self, audio_path: &Path) -> Result<Value> {
+    fn transcribe_audio_file(&self, audio_path: &Path, model: AsrModel) -> Result<Value> {
         if !audio_transcription_extension_allowed(audio_path) {
             return Err(StudioError::UnsupportedTranscriptionAudio.into());
         }
-        let (segments, srt, words) = self.subtitles.extract(audio_path)?;
+        let (segments, srt, words) = self.subtitles.extract(audio_path, model)?;
         // This is a stable, direct rendering of the segments returned by the
         // one FunClip/FunASR run; it intentionally performs no second inference.
         let text = segments

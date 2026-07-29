@@ -3,4 +3,4 @@
 	url = https://github.com/FunAudioLLM/CosyVoice.git
 [submodule "vendor/FunClip"]
 	path = vendor/FunClip
-	url = https://github.com/modelscope/FunClip.git
+	url = https://github.com/LIghtJUNction/FunClip.git

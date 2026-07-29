@@ -47,7 +47,8 @@ password reset revoke the session immediately.
 - `POST /api/videos/subtitles` accepts JSON `video_path` relative to
   `VWA_VIDEO_INPUT_DIR` and returns `{segments, srt}` with precise timestamps.
 - `POST /api/audio/transcriptions` accepts JSON `audio_path` relative to
-  `VWA_AUDIO_INPUT_DIR`. `POST /api/audio/transcriptions/upload` accepts one
+  `VWA_AUDIO_INPUT_DIR` and optional `asr_model` (`paraformer`, the default, or
+  multilingual `sensevoice`). `POST /api/audio/transcriptions/upload` accepts one
   multipart `audio` file per request. Both accept only WAV, MP3, AAC, M4A, or
   FLAC and return `{text, segments, srt, words}` from the same FunClip stage-1
   FunASR run. The browser batches up to 50 files by making those one-file
@@ -105,7 +106,7 @@ Translation actions on `video_editor`:
 
 Recording transcription action on `video_editor`:
 
-- `transcribe_audio` — `{audio_path}` relative to `VWA_AUDIO_INPUT_DIR`; it
+- `transcribe_audio` — `{audio_path, asr_model?}` relative to `VWA_AUDIO_INPUT_DIR`; it
   accepts WAV, MP3, AAC, M4A, or FLAC and returns direct segment-derived
   `{text, segments, srt, words}` from one FunClip stage-1 FunASR run.
 

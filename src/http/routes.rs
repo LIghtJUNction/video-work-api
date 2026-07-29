@@ -27,6 +27,7 @@ use webauthn_rs::prelude::{Passkey, PublicKeyCredential, RegisterPublicKeyCreden
 use super::limiter::LoginLimiter;
 use crate::audio::{extension_allowed, MAX_UPLOAD_BYTES};
 use crate::database::SESSION_TTL_SECONDS;
+use crate::engine::GenerationMode;
 use crate::error::{AppError, AppResult};
 use crate::filenames::{content_disposition_attachment, download_name_from_text};
 use crate::mcp::{handle_mcp_message, McpResponse};
@@ -43,7 +44,7 @@ use crate::security::{
 };
 use crate::studio::{Studio, StudioError};
 use crate::subtitles::{
-    audio_transcription_extension_allowed, video_extension_allowed, SubtitleSegment,
+    audio_transcription_extension_allowed, video_extension_allowed, AsrModel, SubtitleSegment,
     MAX_VIDEO_UPLOAD_BYTES,
 };
 use crate::video_editor::{self, EditorError, VideoEditorRequest};
@@ -1533,12 +1534,15 @@ async fn delete_profile(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GenerationBody {
     speaker_id: String,
     profile_id: String,
     target_text: String,
     #[serde(default = "default_speed")]
     speed: f64,
+    #[serde(default)]
+    generation_mode: GenerationMode,
 }
 
 fn default_speed() -> f64 {
@@ -1548,9 +1552,20 @@ fn default_speed() -> f64 {
 async fn generate(
     State(state): State<AppState>,
     jar: CookieJar,
-    Json(body): Json<GenerationBody>,
+    body: Result<Json<GenerationBody>, axum::extract::rejection::JsonRejection>,
 ) -> AppResult<Response> {
     require_auth(&state, &jar)?;
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(axum::extract::rejection::JsonRejection::JsonDataError(_)) => {
+            return Err(AppError::api(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "Invalid generation request",
+            ));
+        }
+        Err(rejection) => return Ok(rejection.into_response()),
+    };
     let text = body.target_text.trim();
     if !target_text_is_valid(text) {
         return Err(AppError::invalid_request(
@@ -1567,8 +1582,9 @@ async fn generate(
     let profile_id = body.profile_id.clone();
     let target = text.to_string();
     let speed = body.speed;
+    let generation_mode = body.generation_mode;
     let result = tokio::task::spawn_blocking(move || {
-        studio.generate_speech(&speaker_id, &profile_id, &target, speed)
+        studio.generate_speech(&speaker_id, &profile_id, &target, speed, generation_mode)
     })
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
@@ -1579,6 +1595,7 @@ async fn generate(
                 "id": v.get("id"),
                 "audio_url": v.get("audio_url"),
                 "audio": v.get("audio"),
+                "generation_mode": v.get("generation_mode"),
                 // Browser <a download> prefers a human-readable basename.
                 "download_name": v
                     .get("download_name")
@@ -1654,22 +1671,42 @@ struct SubtitleBody {
 #[derive(Deserialize)]
 struct AudioTranscriptionBody {
     audio_path: String,
+    #[serde(default)]
+    asr_model: AsrModel,
 }
 
 async fn audio_transcription(
     State(state): State<AppState>,
     jar: CookieJar,
-    Json(body): Json<AudioTranscriptionBody>,
+    body: Result<Json<AudioTranscriptionBody>, axum::extract::rejection::JsonRejection>,
 ) -> AppResult<Json<Value>> {
     require_auth(&state, &jar)?;
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(axum::extract::rejection::JsonRejection::JsonDataError(_)) => {
+            return Err(AppError::api(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "Invalid audio transcription request",
+            ));
+        }
+        Err(_) => {
+            return Err(AppError::api(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "Invalid audio transcription request",
+            ));
+        }
+    };
     let audio_path = body.audio_path.trim().to_string();
     if audio_path.is_empty() || audio_path.len() > 4096 {
         return Err(AppError::invalid_request("audio_path is required"));
     }
     let studio = state.studio.clone();
-    let result = tokio::task::spawn_blocking(move || studio.transcribe_audio(&audio_path))
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+    let result =
+        tokio::task::spawn_blocking(move || studio.transcribe_audio(&audio_path, body.asr_model))
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
     match result {
         Ok(value) => Ok(Json(value)),
         Err(error) => Err(audio_transcription_error(&error)),

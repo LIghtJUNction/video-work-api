@@ -23,6 +23,29 @@ pub struct SubtitleSegment {
     pub text: String,
 }
 
+/// ASR checkpoint used by a single FunClip stage-1 recognition run.
+///
+/// Paraformer remains the compatibility default for subtitle extraction and
+/// recordings. SenseVoice is opt-in because it is the multilingual model and
+/// has different recognition characteristics.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AsrModel {
+    #[default]
+    #[serde(rename = "paraformer")]
+    Paraformer,
+    #[serde(rename = "sensevoice")]
+    SenseVoice,
+}
+
+impl AsrModel {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Paraformer => "paraformer",
+            Self::SenseVoice => "sensevoice",
+        }
+    }
+}
+
 pub const MAX_VIDEO_UPLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Formats accepted by FunClip stage-1 for standalone recording transcription.
@@ -83,6 +106,7 @@ pub trait SubtitleExtractor: Send + Sync {
     fn extract(
         &self,
         video_path: &Path,
+        model: AsrModel,
     ) -> Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)>;
 }
 
@@ -211,6 +235,15 @@ impl FunClipExtractor {
         let python = std::env::var_os("VWA_PYTHON")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("python3"));
+        Self::with_python_and_cancellation(root, timeout_seconds, python, cancellation)
+    }
+
+    pub fn with_python_and_cancellation(
+        root: Option<PathBuf>,
+        timeout_seconds: u64,
+        python: PathBuf,
+        cancellation: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             root,
             timeout: Duration::from_secs(timeout_seconds),
@@ -234,6 +267,7 @@ impl SubtitleExtractor for FunClipExtractor {
     fn extract(
         &self,
         video_path: &Path,
+        model: AsrModel,
     ) -> Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
         let root = self
             .root
@@ -252,6 +286,8 @@ impl SubtitleExtractor for FunClipExtractor {
             video_path.to_str().context("video path")?,
             "--output_dir",
             output_dir.to_str().context("output dir")?,
+            "--model",
+            model.as_str(),
         ]);
         #[cfg(unix)]
         {
@@ -325,7 +361,13 @@ impl SubtitleExtractor for FunClipExtractor {
         if segments.is_empty() {
             bail!("FunClip produced an empty or invalid SRT file");
         }
-        let words = parse_funclip_words(output_dir)?;
+        // SenseVoice is multilingual but does not guarantee Paraformer's
+        // token-level timestamp contract. Its SRT remains usable through the
+        // fallback segment emitted by FunClip, while word timings are absent.
+        let words = match model {
+            AsrModel::Paraformer => parse_funclip_words(output_dir)?,
+            AsrModel::SenseVoice => Vec::new(),
+        };
         Ok((segments, srt, words))
     }
 }
@@ -407,6 +449,7 @@ impl SubtitleExtractor for FakeSubtitles {
     fn extract(
         &self,
         _video_path: &Path,
+        _model: AsrModel,
     ) -> Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
         let segments = vec![SubtitleSegment {
             index: 1,
@@ -479,6 +522,16 @@ mod tests {
         ] {
             assert!(!audio_transcription_extension_allowed(Path::new(rejected)));
         }
+    }
+
+    #[test]
+    fn asr_models_are_strict_and_default_to_paraformer() {
+        assert_eq!(AsrModel::default(), AsrModel::Paraformer);
+        assert_eq!(
+            serde_json::from_str::<AsrModel>(r#""sensevoice""#).unwrap(),
+            AsrModel::SenseVoice
+        );
+        assert!(serde_json::from_str::<AsrModel>(r#""unsupported""#).is_err());
     }
 
     #[test]
@@ -560,9 +613,119 @@ EOF
             cancellation: Arc::new(AtomicBool::new(false)),
         };
 
-        let (segments, _, _) = extractor.extract(&video).expect("extract subtitles");
+        let (segments, _, _) = extractor
+            .extract(&video, AsrModel::Paraformer)
+            .expect("extract subtitles");
 
         assert_eq!(segments[0].text, "hello world");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn funclip_extract_forwards_the_selected_asr_model() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let funclip_dir = temp.path().join("funclip");
+        fs::create_dir(&funclip_dir).expect("funclip dir");
+        let helper = funclip_dir.join("videoclipper.py");
+        fs::write(
+            &helper,
+            r#"video=''
+output_dir=''
+model=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --file) video=$2; shift 2 ;;
+    --output_dir) output_dir=$2; shift 2 ;;
+    --model) model=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' "$model" >> "$video.models"
+cat > "$output_dir/total.srt" <<'EOF'
+1
+00:00:00,000 --> 00:00:01,500
+hello world
+EOF
+"#,
+        )
+        .expect("write helper");
+        let video = temp.path().join("video.mp4");
+        fs::write(&video, []).expect("write video");
+        let extractor = FunClipExtractor {
+            root: Some(temp.path().to_path_buf()),
+            timeout: Duration::from_secs(1),
+            python: PathBuf::from("/bin/sh"),
+            cancellation: Arc::new(AtomicBool::new(false)),
+        };
+
+        extractor
+            .extract(&video, AsrModel::Paraformer)
+            .expect("default extraction");
+        extractor
+            .extract(&video, AsrModel::SenseVoice)
+            .expect("SenseVoice extraction");
+
+        assert_eq!(
+            fs::read_to_string(video.with_extension("mp4.models")).unwrap(),
+            "paraformer\nsensevoice\n"
+        );
+    }
+
+    #[test]
+    fn funclip_explicit_python_does_not_depend_on_process_environment() {
+        let python = PathBuf::from("/opt/video-work-api/.venv/bin/python");
+        let extractor = FunClipExtractor::with_python_and_cancellation(
+            None,
+            30,
+            python.clone(),
+            Arc::new(AtomicBool::new(false)),
+        );
+        assert_eq!(extractor.python, python);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensevoice_extract_accepts_an_srt_without_token_timestamps() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let funclip_dir = temp.path().join("funclip");
+        fs::create_dir(&funclip_dir).expect("funclip dir");
+        let helper = funclip_dir.join("videoclipper.py");
+        fs::write(
+            &helper,
+            r#"output_dir=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--output_dir' ]; then
+    output_dir=$2
+    shift 2
+  else
+    shift
+  fi
+done
+cat > "$output_dir/total.srt" <<'EOF'
+1
+00:00:00,000 --> 00:00:01,000
+multilingual text
+EOF
+printf 'multilingual text' > "$output_dir/recog_res_raw"
+printf '[]' > "$output_dir/timestamp"
+"#,
+        )
+        .expect("write helper");
+        let video = temp.path().join("recording.wav");
+        fs::write(&video, []).expect("write recording");
+        let extractor = FunClipExtractor {
+            root: Some(temp.path().to_path_buf()),
+            timeout: Duration::from_secs(1),
+            python: PathBuf::from("/bin/sh"),
+            cancellation: Arc::new(AtomicBool::new(false)),
+        };
+
+        let (segments, _, words) = extractor
+            .extract(&video, AsrModel::SenseVoice)
+            .expect("SenseVoice extraction without token timestamps");
+
+        assert_eq!(segments[0].text, "multilingual text");
+        assert!(words.is_empty());
     }
 
     #[cfg(unix)]
@@ -599,7 +762,7 @@ wait
         };
 
         let start = std::time::Instant::now();
-        let result = extractor.extract(&video);
+        let result = extractor.extract(&video, AsrModel::Paraformer);
         let elapsed = start.elapsed();
         let pid: i32 = fs::read_to_string(video.with_extension("mp4.descendant.pid"))
             .expect("read descendant pid")
@@ -658,7 +821,7 @@ EOF
         };
 
         let start = std::time::Instant::now();
-        let result = extractor.extract(&video);
+        let result = extractor.extract(&video, AsrModel::Paraformer);
         let elapsed = start.elapsed();
         let pid: i32 = fs::read_to_string(video.with_extension("mp4.descendant.pid"))
             .expect("read descendant pid")
@@ -704,7 +867,8 @@ sleep 3
             cancellation: cancellation.clone(),
         };
         let video_for_extract = video.clone();
-        let worker = std::thread::spawn(move || extractor.extract(&video_for_extract));
+        let worker =
+            std::thread::spawn(move || extractor.extract(&video_for_extract, AsrModel::Paraformer));
         let started = (0..40).any(|_| {
             if video.with_extension("mp4.started").is_file() {
                 true
