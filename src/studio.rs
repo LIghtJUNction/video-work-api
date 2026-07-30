@@ -460,7 +460,21 @@ impl Studio {
     pub fn extract_subtitles(&self, video_path_raw: &str) -> Result<Value> {
         let root = self.settings.video_input_dir.as_path();
         let video_path = resolve_under_root(video_path_raw, root)
-            .ok_or_else(|| anyhow!("Video must be inside the configured video input directory"))?;
+            .or_else(|| {
+                let path = Path::new(video_path_raw);
+                let allowed = self.settings.xry_source_root.canonicalize().ok()?;
+                let resolved = path.canonicalize().ok()?;
+                (path.is_absolute()
+                    && resolved.starts_with(&allowed)
+                    && fs::symlink_metadata(path).ok()?.file_type().is_file()
+                    && !fs::symlink_metadata(path).ok()?.file_type().is_symlink())
+                .then_some(resolved)
+            })
+            .ok_or_else(|| {
+                anyhow!(
+                    "Video must be inside the configured video input directory or XRY source root"
+                )
+            })?;
         let (segments, srt, words) = self.subtitles.extract(&video_path, AsrModel::Paraformer)?;
         Ok(json!({
             "segments": segments,
