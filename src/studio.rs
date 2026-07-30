@@ -495,11 +495,20 @@ impl Studio {
                     "Video must be inside the configured video input directory or XRY source root"
                 )
             })?;
-        let (segments, srt, words) = self.subtitles.extract(&video_path, AsrModel::Paraformer)?;
+        let actual_sha256 = source_sha256
+            .map(|expected| {
+                let actual = crate::provenance::sha256_file(&video_path)?;
+                if actual != expected {
+                    bail!("source_sha256 does not match the resolved video file");
+                }
+                Ok(actual)
+            })
+            .transpose()?;
+        let (segments, srt, words) = self.extract_subtitles_from_copy(&video_path)?;
         if let Some(expected_sha256) = source_sha256 {
             return self.xry_frozen_captions(
                 video_path_raw,
-                &video_path,
+                actual_sha256.as_deref().expect("source hash was verified"),
                 expected_sha256,
                 &segments,
                 &words,
@@ -515,12 +524,11 @@ impl Studio {
     fn xry_frozen_captions(
         &self,
         source_path: &str,
-        video_path: &Path,
+        actual_sha256: &str,
         expected_sha256: &str,
         segments: &[SubtitleSegment],
         words: &[WordTimestamp],
     ) -> Result<Value> {
-        let actual_sha256 = crate::provenance::sha256_file(video_path)?;
         if actual_sha256 != expected_sha256 {
             bail!("source_sha256 does not match the resolved video file");
         }
@@ -583,6 +591,24 @@ impl Studio {
                 "model_receipt_ref": format!("vwa-frozen-captions:{receipt_hash}"),
             },
         }))
+    }
+
+    fn extract_subtitles_from_copy(
+        &self,
+        video_path: &Path,
+    ) -> Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
+        let scratch_root = self.settings.data_dir.join("subtitle-inputs");
+        fs::create_dir_all(&scratch_root)?;
+        let extension = video_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("mp4");
+        let scratch_path = scratch_root.join(format!("{}.{}", Uuid::new_v4(), extension));
+        fs::copy(video_path, &scratch_path)?;
+        let result = self.subtitles.extract(&scratch_path, AsrModel::Paraformer);
+        let _ = fs::remove_file(&scratch_path);
+        result
     }
 
     /// Extract subtitles from a server-created upload temp file (already trusted,
