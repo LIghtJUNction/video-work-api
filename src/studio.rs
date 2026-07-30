@@ -642,18 +642,8 @@ impl Studio {
             bail!("Translation model is not ready; cannot attest frozen XRY captions");
         }
 
-        let chinese: Vec<String> = segments
-            .iter()
-            .map(|segment| segment.text.clone())
-            .collect();
-        let english = self.translation.translate_texts("en", &chinese)?;
-        let russian = self.translation.translate_texts("ru", &chinese)?;
-        if english.len() != segments.len() || russian.len() != segments.len() {
-            bail!("Translation provider returned a different number of caption events");
-        }
-
-        let mut events = Vec::with_capacity(segments.len());
-        for (index, segment) in segments.iter().enumerate() {
+        let mut event_bases = Vec::with_capacity(segments.len());
+        for segment in segments {
             let start = parse_subtitle_timestamp(&segment.start)?;
             let end = parse_subtitle_timestamp(&segment.end)?;
             if !start.is_finite() || !end.is_finite() || end <= start {
@@ -667,10 +657,29 @@ impl Studio {
             if tokens.is_empty() {
                 bail!("subtitle segment is missing trustworthy word timestamps");
             }
+            let zh = tokens
+                .iter()
+                .filter_map(|token| token["text"].as_str())
+                .collect::<String>();
+            if zh.is_empty() {
+                bail!("subtitle segment has no text after word-token normalization");
+            }
+            event_bases.push((start, end, zh, tokens));
+        }
+
+        let chinese: Vec<String> = event_bases.iter().map(|(_, _, zh, _)| zh.clone()).collect();
+        let english = self.translation.translate_texts("en", &chinese)?;
+        let russian = self.translation.translate_texts("ru", &chinese)?;
+        if english.len() != event_bases.len() || russian.len() != event_bases.len() {
+            bail!("Translation provider returned a different number of caption events");
+        }
+
+        let mut events = Vec::with_capacity(event_bases.len());
+        for (index, (start, end, zh, tokens)) in event_bases.into_iter().enumerate() {
             events.push(json!({
                 "start": start,
                 "end": end,
-                "zh": segment.text,
+                "zh": zh,
                 "en": english[index],
                 "ru": russian[index],
                 "zh_tokens": tokens,
@@ -738,7 +747,7 @@ impl Studio {
         self.settings
             .data_dir
             .join("xry-frozen-captions")
-            .join(format!("{source_sha256}.json"))
+            .join(format!("v2-{source_sha256}.json"))
     }
 
     fn read_frozen_caption_cache(
