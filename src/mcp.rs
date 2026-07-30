@@ -103,7 +103,13 @@ pub fn tool_specs() -> Value {
                     ),
                     action_schema(
                         "extract_video_subtitles",
-                        json!({ "video_path": { "type": "string" } }),
+                        json!({
+                            "video_path": { "type": "string" },
+                            "source_sha256": {
+                                "type": "string",
+                                "description": "Required by the XRY frozen-caption path. The service verifies it against the allowed source file before returning attested bilingual events."
+                            }
+                        }),
                         &["video_path"]
                     ),
                     action_schema(
