@@ -78,6 +78,8 @@ pub enum VideoEditorRequest {
     },
     ExtractVideoSubtitles {
         video_path: String,
+        #[serde(default)]
+        source_sha256: Option<String>,
     },
     TranscribeAudio {
         audio_path: String,
@@ -270,8 +272,11 @@ pub fn execute(studio: &Studio, request: VideoEditorRequest) -> Result<Value, Ed
         VideoEditorRequest::GetGeneration { generation_id } => studio
             .get_generation(&generation_id)
             .map_err(map_studio_editor),
-        VideoEditorRequest::ExtractVideoSubtitles { video_path } => studio
-            .extract_subtitles(&video_path)
+        VideoEditorRequest::ExtractVideoSubtitles {
+            video_path,
+            source_sha256,
+        } => studio
+            .extract_subtitles(&video_path, source_sha256.as_deref())
             .map_err(map_studio_editor),
         VideoEditorRequest::TranscribeAudio {
             audio_path,
@@ -279,9 +284,7 @@ pub fn execute(studio: &Studio, request: VideoEditorRequest) -> Result<Value, Ed
         } => studio
             .transcribe_audio(&audio_path, asr_model)
             .map_err(map_studio_editor),
-        VideoEditorRequest::ListTranslationLanguages {} => {
-            Ok(studio.list_translation_languages())
-        }
+        VideoEditorRequest::ListTranslationLanguages {} => Ok(studio.list_translation_languages()),
         VideoEditorRequest::Translate {
             target_lang,
             text,

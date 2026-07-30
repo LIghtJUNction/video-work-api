@@ -106,10 +106,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/model/download-translation",
             get(translation_download_status).post(start_translation_download),
         )
-        .route(
-            "/api/translate/languages",
-            get(list_translation_languages),
-        )
+        .route("/api/translate/languages", get(list_translation_languages))
         .route("/api/translate", post(translate_text))
         .route("/api/auth/passkeys", get(list_passkeys))
         .route(
@@ -1230,11 +1227,7 @@ fn translate_error(e: &anyhow::Error) -> AppError {
         AppError::invalid_request(msg)
     } else {
         tracing::warn!(error = %msg, "Translation failed");
-        AppError::api(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "translation_failed",
-            msg,
-        )
+        AppError::api(StatusCode::SERVICE_UNAVAILABLE, "translation_failed", msg)
     }
 }
 
@@ -1829,7 +1822,7 @@ async fn video_subtitles(
         return Err(AppError::invalid_request("video_path is required"));
     }
     let studio = state.studio.clone();
-    let result = tokio::task::spawn_blocking(move || studio.extract_subtitles(&video_path))
+    let result = tokio::task::spawn_blocking(move || studio.extract_subtitles(&video_path, None))
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
     match result {
