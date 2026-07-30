@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
@@ -31,6 +31,81 @@ pub struct Studio {
     pub engine: Arc<dyn SpeechEngine>,
     pub subtitles: Arc<dyn SubtitleExtractor>,
     pub translation: Arc<dyn TranslationEngine>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::config::Settings;
+    use crate::database::Database;
+    use crate::engine::FakeEngine;
+    use crate::subtitles::FakeSubtitles;
+    use crate::translation::FakeTranslationEngine;
+
+    fn studio(root: &Path) -> Studio {
+        let settings = Settings {
+            data_dir: root.join("data"),
+            model_dir: root.join("model"),
+            translation_model_dir: root.join("translation-model"),
+            cosyvoice_root: root.join("source"),
+            setup_token_file: root.join("setup-token"),
+            host: "127.0.0.1".into(),
+            port: 7860,
+            ssl_certfile: None,
+            ssl_keyfile: None,
+            mcp_token: None,
+            mcp_token_file: root.join("mcp-token"),
+            mcp_token_source: None,
+            funclip_root: None,
+            video_input_dir: root.join("videos"),
+            audio_input_dir: root.join("audio"),
+            reference_input_dir: root.join("references"),
+            video_projects_dir: root.join("video-projects"),
+            receipt_key_file: root.join("receipt.key"),
+            subtitle_timeout_seconds: 30,
+            translation_timeout_seconds: 30,
+            xry_task_root: root.join("xry-tasks"),
+            xry_source_root: root.join("xry-sources"),
+            xry_renderer: root.join("render.py"),
+            xry_python: PathBuf::from("/usr/bin/python3").canonicalize().unwrap(),
+            render_timeout_seconds: 30,
+            video_project_renderer: root.join("video-project-render.py"),
+            video_project_python: PathBuf::from("/usr/bin/python3").canonicalize().unwrap(),
+            video_project_render_timeout_seconds: 30,
+            project_root: root.to_path_buf(),
+        };
+        settings.create_data_dirs().unwrap();
+        fs::create_dir_all(&settings.xry_source_root).unwrap();
+        Studio::new(
+            settings,
+            Database::open(root.join("studio.sqlite3")).unwrap(),
+            Arc::new(FakeEngine::new()),
+            Arc::new(FakeSubtitles::default()),
+            Arc::new(FakeTranslationEngine::new()),
+        )
+    }
+
+    #[test]
+    fn xry_subtitle_copy_is_removed_after_hash_rejection() {
+        let root = tempdir().unwrap();
+        let studio = studio(root.path());
+        let source = studio.settings.xry_source_root.join("source.mov");
+        fs::write(&source, b"frozen source bytes").unwrap();
+        let source_sha256 = crate::provenance::sha256_file(&source).unwrap();
+        let error = studio
+            .extract_subtitles(source.to_str().unwrap(), Some(&source_sha256))
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("XRY frozen captions require non-empty"));
+        let scratch = studio.settings.data_dir.join("subtitle-inputs");
+        assert!(fs::read_dir(scratch).unwrap().next().is_none());
+    }
 }
 
 fn parse_subtitle_timestamp(timestamp: &str) -> Result<f64> {
@@ -495,24 +570,27 @@ impl Studio {
                     "Video must be inside the configured video input directory or XRY source root"
                 )
             })?;
-        let actual_sha256 = source_sha256
-            .map(|expected| {
-                let actual = crate::provenance::sha256_file(&video_path)?;
-                if actual != expected {
-                    bail!("source_sha256 does not match the resolved video file");
-                }
-                Ok(actual)
-            })
-            .transpose()?;
-        let (segments, srt, words) = self.extract_subtitles_from_copy(&video_path)?;
+        let cached = match source_sha256 {
+            Some(expected) => {
+                self.read_frozen_caption_cache(&video_path, expected, video_path_raw)?
+            }
+            None => None,
+        };
+        if let Some(payload) = cached {
+            return Ok(payload);
+        }
+        let (segments, srt, words, actual_sha256) =
+            self.extract_subtitles_from_copy(&video_path, source_sha256)?;
         if let Some(expected_sha256) = source_sha256 {
-            return self.xry_frozen_captions(
+            let payload = self.xry_frozen_captions(
                 video_path_raw,
                 actual_sha256.as_deref().expect("source hash was verified"),
                 expected_sha256,
                 &segments,
                 &words,
-            );
+            )?;
+            self.write_frozen_caption_cache(expected_sha256, &payload)?;
+            return Ok(payload);
         }
         Ok(json!({
             "segments": segments,
@@ -596,7 +674,13 @@ impl Studio {
     fn extract_subtitles_from_copy(
         &self,
         video_path: &Path,
-    ) -> Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
+        expected_sha256: Option<&str>,
+    ) -> Result<(
+        Vec<SubtitleSegment>,
+        String,
+        Vec<WordTimestamp>,
+        Option<String>,
+    )> {
         let scratch_root = self.settings.data_dir.join("subtitle-inputs");
         fs::create_dir_all(&scratch_root)?;
         let extension = video_path
@@ -605,10 +689,67 @@ impl Studio {
             .filter(|value| !value.is_empty())
             .unwrap_or("mp4");
         let scratch_path = scratch_root.join(format!("{}.{}", Uuid::new_v4(), extension));
-        fs::copy(video_path, &scratch_path)?;
-        let result = self.subtitles.extract(&scratch_path, AsrModel::Paraformer);
+        let result = (|| {
+            fs::copy(video_path, &scratch_path)?;
+            let copied_sha256 = expected_sha256
+                .map(|expected| {
+                    let actual = crate::provenance::sha256_file(&scratch_path)?;
+                    if actual != expected {
+                        bail!("source_sha256 does not match the copied video file");
+                    }
+                    Ok(actual)
+                })
+                .transpose()?;
+            let (segments, srt, words) = self
+                .subtitles
+                .extract(&scratch_path, AsrModel::Paraformer)?;
+            Ok((segments, srt, words, copied_sha256))
+        })();
         let _ = fs::remove_file(&scratch_path);
         result
+    }
+
+    fn frozen_caption_cache_path(&self, source_sha256: &str) -> PathBuf {
+        self.settings
+            .data_dir
+            .join("xry-frozen-captions")
+            .join(format!("{source_sha256}.json"))
+    }
+
+    fn read_frozen_caption_cache(
+        &self,
+        video_path: &Path,
+        expected_sha256: &str,
+        source_path: &str,
+    ) -> Result<Option<Value>> {
+        if crate::provenance::sha256_file(video_path)? != expected_sha256 {
+            bail!("source_sha256 does not match the resolved video file");
+        }
+        let path = self.frozen_caption_cache_path(expected_sha256);
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let mut cached: Value = serde_json::from_slice(&bytes)?;
+        if cached["status"] != "PASS"
+            || cached["source"]["sha256"] != expected_sha256
+            || !cached["captions"]["events"].is_array()
+        {
+            bail!("frozen caption cache is malformed");
+        }
+        cached["source"]["path"] = json!(source_path);
+        Ok(Some(cached))
+    }
+
+    fn write_frozen_caption_cache(&self, source_sha256: &str, payload: &Value) -> Result<()> {
+        let path = self.frozen_caption_cache_path(source_sha256);
+        let parent = path.parent().expect("cache path has a parent");
+        fs::create_dir_all(parent)?;
+        let temporary = parent.join(format!(".{}.tmp", Uuid::new_v4()));
+        fs::write(&temporary, serde_json::to_vec(payload)?)?;
+        fs::rename(temporary, path)?;
+        Ok(())
     }
 
     /// Extract subtitles from a server-created upload temp file (already trusted,
