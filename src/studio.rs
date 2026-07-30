@@ -91,20 +91,31 @@ mod tests {
     }
 
     #[test]
-    fn xry_subtitle_copy_is_removed_after_hash_rejection() {
+    fn xry_subtitle_copy_rejects_mismatched_hash_and_cleans_up() {
         let root = tempdir().unwrap();
         let studio = studio(root.path());
         let source = studio.settings.xry_source_root.join("source.mov");
         fs::write(&source, b"frozen source bytes").unwrap();
-        let source_sha256 = crate::provenance::sha256_file(&source).unwrap();
         let error = studio
-            .extract_subtitles(source.to_str().unwrap(), Some(&source_sha256))
+            .extract_subtitles_from_copy(&source, Some(&"0".repeat(64)))
             .unwrap_err();
         assert!(error
             .to_string()
-            .contains("XRY frozen captions require non-empty"));
+            .contains("source_sha256 does not match the copied"));
         let scratch = studio.settings.data_dir.join("subtitle-inputs");
         assert!(fs::read_dir(scratch).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn xry_subtitle_cache_key_rejects_path_traversal() {
+        let root = tempdir().unwrap();
+        let studio = studio(root.path());
+        let source = studio.settings.xry_source_root.join("source.mov");
+        fs::write(&source, b"frozen source bytes").unwrap();
+        let error = studio
+            .extract_subtitles(source.to_str().unwrap(), Some("../outside"))
+            .unwrap_err();
+        assert!(error.to_string().contains("source_sha256 must be"));
     }
 }
 
@@ -120,6 +131,17 @@ fn parse_subtitle_timestamp(timestamp: &str) -> Result<f64> {
         bail!("subtitle timestamp is out of range");
     }
     Ok(hours * 3600.0 + minutes * 60.0 + seconds)
+}
+
+fn validate_sha256(value: &str) -> Result<()> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        bail!("source_sha256 must be exactly 64 lowercase hexadecimal characters");
+    }
+    Ok(())
 }
 
 impl Studio {
@@ -553,6 +575,9 @@ impl Studio {
         video_path_raw: &str,
         source_sha256: Option<&str>,
     ) -> Result<Value> {
+        if let Some(source_sha256) = source_sha256 {
+            validate_sha256(source_sha256)?;
+        }
         let root = self.settings.video_input_dir.as_path();
         let video_path = resolve_under_root(video_path_raw, root)
             .or_else(|| {
