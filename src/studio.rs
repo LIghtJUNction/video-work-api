@@ -25,6 +25,8 @@ use crate::translation::{
 };
 use crate::{MAX_TEXT_LENGTH, PRODUCT};
 
+const XRY_MAX_CAPTION_CHARS: usize = 12;
+
 pub struct Studio {
     pub settings: Settings,
     pub database: Database,
@@ -131,6 +133,25 @@ fn parse_subtitle_timestamp(timestamp: &str) -> Result<f64> {
         bail!("subtitle timestamp is out of range");
     }
     Ok(hours * 3600.0 + minutes * 60.0 + seconds)
+}
+
+fn xry_caption_event_from_tokens(tokens: &[Value]) -> Result<(f64, f64, String, Vec<Value>)> {
+    let start = tokens
+        .first()
+        .and_then(|token| token["start"].as_f64())
+        .ok_or_else(|| anyhow!("word token start is missing"))?;
+    let end = tokens
+        .last()
+        .and_then(|token| token["end"].as_f64())
+        .ok_or_else(|| anyhow!("word token end is missing"))?;
+    let zh = tokens
+        .iter()
+        .filter_map(|token| token["text"].as_str())
+        .collect::<String>();
+    if zh.is_empty() || !start.is_finite() || !end.is_finite() || end <= start {
+        bail!("word-token caption event is invalid");
+    }
+    Ok((start, end, zh, tokens.to_vec()))
 }
 
 fn validate_sha256(value: &str) -> Result<()> {
@@ -657,14 +678,25 @@ impl Studio {
             if tokens.is_empty() {
                 bail!("subtitle segment is missing trustworthy word timestamps");
             }
-            let zh = tokens
-                .iter()
-                .filter_map(|token| token["text"].as_str())
-                .collect::<String>();
-            if zh.is_empty() {
-                bail!("subtitle segment has no text after word-token normalization");
+            let mut chunk = Vec::new();
+            let mut chunk_chars = 0usize;
+            for token in tokens {
+                let token_chars = token["text"]
+                    .as_str()
+                    .map(str::chars)
+                    .map(Iterator::count)
+                    .unwrap_or(0);
+                if !chunk.is_empty() && chunk_chars + token_chars > XRY_MAX_CAPTION_CHARS {
+                    event_bases.push(xry_caption_event_from_tokens(&chunk)?);
+                    chunk.clear();
+                    chunk_chars = 0;
+                }
+                chunk_chars += token_chars;
+                chunk.push(token);
             }
-            event_bases.push((start, end, zh, tokens));
+            if !chunk.is_empty() {
+                event_bases.push(xry_caption_event_from_tokens(&chunk)?);
+            }
         }
 
         let chinese: Vec<String> = event_bases.iter().map(|(_, _, zh, _)| zh.clone()).collect();
@@ -747,7 +779,7 @@ impl Studio {
         self.settings
             .data_dir
             .join("xry-frozen-captions")
-            .join(format!("v2-{source_sha256}.json"))
+            .join(format!("v3-{source_sha256}.json"))
     }
 
     fn read_frozen_caption_cache(
