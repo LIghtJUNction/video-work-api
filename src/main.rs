@@ -588,7 +588,11 @@ fn cmd_status(settings: &mut Settings) -> Result<()> {
     let translation_present = model_kind_files_present(settings, ModelKind::Translation);
     println!(
         "translation_model: {}",
-        if translation_present { "present" } else { "missing" }
+        if translation_present {
+            "present"
+        } else {
+            "missing"
+        }
     );
     println!(
         "translation_ready: {}",
@@ -732,14 +736,13 @@ async fn cmd_serve(mut settings: Settings) -> Result<()> {
     ));
     let cancellation = Arc::new(AtomicBool::new(false));
     let subtitle_python = resolve_python(&settings).unwrap_or_else(|| PathBuf::from("python3"));
-    let subtitles: Arc<dyn SubtitleExtractor> = Arc::new(
-        FunClipExtractor::with_python_and_cancellation(
+    let subtitles: Arc<dyn SubtitleExtractor> =
+        Arc::new(FunClipExtractor::with_python_and_cancellation(
             settings.funclip_root.clone(),
             settings.subtitle_timeout_seconds,
             subtitle_python,
             cancellation.clone(),
-        ),
-    );
+        ));
     let translation: Arc<dyn TranslationEngine> = Arc::new(MadladEngine::new(
         settings.translation_model_dir.clone(),
         &settings.project_root,

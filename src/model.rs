@@ -172,7 +172,10 @@ pub fn translation_dir_files_present(model_dir: &Path) -> bool {
 }
 
 fn model_assets_present(model_dir: &Path, files: &[&str]) -> bool {
-    model_dir.is_dir() && files.iter().all(|relative| model_dir.join(relative).is_file())
+    model_dir.is_dir()
+        && files
+            .iter()
+            .all(|relative| model_dir.join(relative).is_file())
 }
 
 fn which_bin(name: &str) -> Option<PathBuf> {

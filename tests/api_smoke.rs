@@ -1555,7 +1555,11 @@ async fn audio_transcription_forwards_requested_asr_model_to_extractor() {
     fs::write(root.join("static/index.html"), b"<html></html>").unwrap();
     let settings = test_settings(root);
     settings.create_data_dirs().unwrap();
-    fs::write(settings.audio_input_dir.join("meeting.m4a"), b"fake recording").unwrap();
+    fs::write(
+        settings.audio_input_dir.join("meeting.m4a"),
+        b"fake recording",
+    )
+    .unwrap();
     let db = Database::open(settings.database_path()).unwrap();
     db.set_admin(&video_work_api::security::hash_password("correct horse battery staple").unwrap())
         .unwrap();
