@@ -343,8 +343,8 @@ impl TranslationEngine for MadladEngine {
             }
             bail!("MADLAD translation failed: {stderr}");
         }
-        let response: MadladResponse = serde_json::from_slice(&output.stdout)
-            .context("parse madlad helper JSON response")?;
+        let response: MadladResponse =
+            serde_json::from_slice(&output.stdout).context("parse madlad helper JSON response")?;
         if response.translations.len() != texts.len() {
             bail!(
                 "MADLAD returned {} translations for {} inputs",
@@ -413,9 +413,7 @@ pub fn validate_texts(texts: &[String]) -> Result<()> {
         bail!("Nothing to translate");
     }
     if texts.len() > MAX_TRANSLATE_SEGMENTS {
-        bail!(
-            "At most {MAX_TRANSLATE_SEGMENTS} texts/segments can be translated at once"
-        );
+        bail!("At most {MAX_TRANSLATE_SEGMENTS} texts/segments can be translated at once");
     }
     let mut total = 0usize;
     for (index, text) in texts.iter().enumerate() {
@@ -549,7 +547,8 @@ mod tests {
         let plain = translate_request(&engine, "en", Some("你好"), None, None, None).unwrap();
         assert_eq!(plain["text"], "[en] 你好");
 
-        let srt = "1\n00:00:00,000 --> 00:00:01,000\n你好\n\n2\n00:00:01,000 --> 00:00:02,000\n世界\n";
+        let srt =
+            "1\n00:00:00,000 --> 00:00:01,000\n你好\n\n2\n00:00:01,000 --> 00:00:02,000\n世界\n";
         let result = translate_request(&engine, "ru", None, None, Some(srt), None).unwrap();
         assert_eq!(result["segments"][0]["text"], "[ru] 你好");
         assert_eq!(result["segments"][1]["text"], "[ru] 世界");
