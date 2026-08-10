@@ -257,45 +257,35 @@ impl FunClipExtractor {
         let script = root.join("funclip").join("videoclipper.py");
         script.is_file().then_some(script)
     }
-}
 
-impl SubtitleExtractor for FunClipExtractor {
-    fn ready(&self) -> bool {
-        self.videoclipper().is_some()
+    /// Use the project-owned streaming helper for standalone recordings when
+    /// it is present.  The helper keeps FunASR loaded once and feeds it bounded
+    /// ffmpeg-decoded chunks instead of asking librosa to materialize a whole
+    /// multi-hour recording in one array.
+    fn audio_transcriber(&self) -> Option<PathBuf> {
+        let mut roots = Vec::new();
+        if let Some(project_root) = std::env::var_os("VWA_PROJECT_ROOT") {
+            roots.push(PathBuf::from(project_root));
+        }
+        if let Some(funclip_root) = self.root.as_deref() {
+            roots.extend(funclip_root.ancestors().map(Path::to_path_buf));
+        }
+        if let Ok(executable) = std::env::current_exe() {
+            roots.extend(executable.ancestors().map(Path::to_path_buf));
+        }
+        roots
+            .into_iter()
+            .map(|root| root.join("scripts").join("funclip_transcribe.py"))
+            .find(|script| script.is_file())
     }
 
-    fn extract(
-        &self,
-        video_path: &Path,
-        model: AsrModel,
-    ) -> Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
-        let root = self
-            .root
-            .as_ref()
-            .context("FunClip is not installed; set VWA_FUNCLIP_ROOT")?;
-        let script = self
-            .videoclipper()
-            .context("FunClip is not installed; set VWA_FUNCLIP_ROOT")?;
-        let temp = tempfile::tempdir_in(std::env::temp_dir()).context("temp dir")?;
-        let output_dir = temp.path();
-        let mut command = Command::new(&self.python);
-        command.arg(&script).args([
-            "--stage",
-            "1",
-            "--file",
-            video_path.to_str().context("video path")?,
-            "--output_dir",
-            output_dir.to_str().context("output dir")?,
-            "--model",
-            model.as_str(),
-        ]);
+    fn run_funclip(&self, mut command: Command) -> Result<()> {
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
             command.process_group(0);
         }
         let mut child = command
-            .current_dir(root)
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
@@ -335,7 +325,7 @@ impl SubtitleExtractor for FunClipExtractor {
             format!("; cleanup errors: {}", cleanup_errors.join("; "))
         };
         match outcome {
-            FunClipWaitOutcome::Exited(status) if status.success() => {}
+            FunClipWaitOutcome::Exited(status) if status.success() => Ok(()),
             FunClipWaitOutcome::Exited(_) => {
                 bail!("FunClip subtitle extraction failed; {stderr}{cleanup}")
             }
@@ -349,7 +339,13 @@ impl SubtitleExtractor for FunClipExtractor {
                 bail!("wait FunClip: {error}; {stderr}{cleanup}")
             }
         }
+    }
 
+    fn read_outputs(
+        &self,
+        output_dir: &Path,
+        model: AsrModel,
+    ) -> Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
         let mut srt_files: Vec<PathBuf> = Vec::new();
         collect_srt(output_dir, &mut srt_files)?;
         srt_files.sort();
@@ -372,6 +368,62 @@ impl SubtitleExtractor for FunClipExtractor {
     }
 }
 
+impl SubtitleExtractor for FunClipExtractor {
+    fn ready(&self) -> bool {
+        self.videoclipper().is_some()
+    }
+
+    fn extract(
+        &self,
+        video_path: &Path,
+        model: AsrModel,
+    ) -> Result<(Vec<SubtitleSegment>, String, Vec<WordTimestamp>)> {
+        let root = self
+            .root
+            .as_ref()
+            .context("FunClip is not installed; set VWA_FUNCLIP_ROOT")?;
+        let is_recording = audio_transcription_extension_allowed(video_path);
+        let (script, streaming_audio) = if is_recording {
+            if let Some(script) = self.audio_transcriber() {
+                (script, true)
+            } else {
+                (
+                    self.videoclipper()
+                        .context("FunClip is not installed; set VWA_FUNCLIP_ROOT")?,
+                    false,
+                )
+            }
+        } else {
+            (
+                self.videoclipper()
+                    .context("FunClip is not installed; set VWA_FUNCLIP_ROOT")?,
+                false,
+            )
+        };
+        let temp = tempfile::tempdir_in(std::env::temp_dir()).context("temp dir")?;
+        let output_dir = temp.path();
+        let mut command = Command::new(&self.python);
+        command.arg(&script).args([
+            "--file",
+            video_path.to_str().context("video path")?,
+            "--output_dir",
+            output_dir.to_str().context("output dir")?,
+            "--model",
+            model.as_str(),
+        ]);
+        if !streaming_audio {
+            command.arg("--stage").arg("1");
+        }
+        // The helper must import the same configured FunClip tree as the
+        // service.  This matters for installations whose model/vendor root is
+        // outside the repository checkout.
+        command.env("VWA_FUNCLIP_ROOT", root);
+        command.current_dir(root);
+        self.run_funclip(command)?;
+        self.read_outputs(output_dir, model)
+    }
+}
+
 fn parse_funclip_words(output_dir: &Path) -> Result<Vec<WordTimestamp>> {
     let raw_path = output_dir.join("recog_res_raw");
     let timestamp_path = output_dir.join("timestamp");
@@ -390,7 +442,8 @@ fn parse_funclip_words(output_dir: &Path) -> Result<Vec<WordTimestamp>> {
     let normalized = timestamp_literal.replace('(', "[").replace(')', "]");
     let timestamps: Vec<[f64; 2]> =
         serde_json::from_str(&normalized).context("parse FunClip token timestamps")?;
-    let token_re = Regex::new(r"[\p{Han}]|[\p{L}\p{N}_-]+").expect("token regex");
+    let token_re =
+        Regex::new(r"[\p{Han}]|[\p{L}\p{N}_-]+(?:['’][\p{L}\p{N}_-]+)*").expect("token regex");
     let tokens = token_re
         .find_iter(&raw)
         .map(|item| item.as_str().to_string())
@@ -577,6 +630,17 @@ mod tests {
             .contains("cardinality mismatch"));
     }
 
+    #[test]
+    fn preserves_contractions_as_one_funclip_word_token() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("recog_res_raw"), "it's").unwrap();
+        fs::write(temp.path().join("timestamp"), "[[1000, 1240]]").unwrap();
+        let words = parse_funclip_words(temp.path()).unwrap();
+        assert_eq!(words[0].word, "it's");
+        assert_eq!(words[0].start, 1.0);
+        assert_eq!(words[0].end, 1.24);
+    }
+
     #[cfg(unix)]
     #[test]
     fn funclip_extract_succeeds_when_stderr_exceeds_pipe_capacity() {
@@ -671,6 +735,87 @@ EOF
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn long_audio_uses_the_streaming_transcription_helper() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let app_root = temp.path();
+        let funclip_root = app_root.join("vendor/FunClip");
+        let helper_root = app_root.join("scripts");
+        fs::create_dir_all(funclip_root.join("funclip")).expect("funclip root");
+        fs::create_dir_all(&helper_root).expect("helper root");
+        fs::write(
+            helper_root.join("funclip_transcribe.py"),
+            r#"output_dir=''
+audio=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --file) audio=$2; shift 2 ;;
+    --output_dir) output_dir=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+touch "$audio.called"
+printf '%s' "${VWA_FUNCLIP_ROOT-}" > "$audio.funclip-root"
+cat > "$output_dir/total.srt" <<'EOF'
+1
+00:00:00,000 --> 00:00:01,000
+chunked audio
+EOF
+printf 'chunked audio' > "$output_dir/recog_res_raw"
+printf '[[0, 1000], [1000, 2000]]' > "$output_dir/timestamp"
+"#,
+        )
+        .expect("write streaming helper");
+        let audio = temp.path().join("recording.wav");
+        fs::write(&audio, []).expect("write recording");
+        let extractor = FunClipExtractor {
+            root: Some(funclip_root.clone()),
+            timeout: Duration::from_secs(1),
+            python: PathBuf::from("/bin/sh"),
+            cancellation: Arc::new(AtomicBool::new(false)),
+        };
+
+        let (segments, srt, words) = extractor
+            .extract(&audio, AsrModel::Paraformer)
+            .expect("streaming audio extraction");
+
+        assert_eq!(segments[0].text, "chunked audio");
+        assert_eq!(segments[0].start, "00:00:00.000");
+        assert_eq!(segments[0].end, "00:00:01.000");
+        assert!(srt.contains("00:00:00,000 --> 00:00:01,000"));
+        assert_eq!(
+            words
+                .iter()
+                .map(|word| (word.word.as_str(), word.start, word.end))
+                .collect::<Vec<_>>(),
+            vec![("chunked", 0.0, 1.0), ("audio", 1.0, 2.0)]
+        );
+        assert!(audio.with_extension("wav.called").is_file());
+        assert_eq!(
+            fs::read_to_string(audio.with_extension("wav.funclip-root")).unwrap(),
+            funclip_root.to_string_lossy()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_funclip_root_keeps_the_project_streaming_helper() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let extractor = FunClipExtractor {
+            root: Some(temp.path().join("custom-model-tree")),
+            timeout: Duration::from_secs(1),
+            python: PathBuf::from("/bin/sh"),
+            cancellation: Arc::new(AtomicBool::new(false)),
+        };
+
+        let helper = extractor
+            .audio_transcriber()
+            .expect("project-owned streaming helper");
+        assert!(helper.ends_with("scripts/funclip_transcribe.py"));
+        assert!(helper.is_file());
+    }
+
     #[test]
     fn funclip_explicit_python_does_not_depend_on_process_environment() {
         let python = PathBuf::from("/opt/video-work-api/.venv/bin/python");
@@ -688,7 +833,9 @@ EOF
     fn sensevoice_extract_accepts_an_srt_without_token_timestamps() {
         let temp = tempfile::tempdir().expect("temp dir");
         let funclip_dir = temp.path().join("funclip");
+        let streaming_dir = temp.path().join("scripts");
         fs::create_dir(&funclip_dir).expect("funclip dir");
+        fs::create_dir(&streaming_dir).expect("streaming helper dir");
         let helper = funclip_dir.join("videoclipper.py");
         fs::write(
             &helper,
@@ -711,6 +858,27 @@ printf '[]' > "$output_dir/timestamp"
 "#,
         )
         .expect("write helper");
+        fs::write(
+            streaming_dir.join("funclip_transcribe.py"),
+            r#"output_dir=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--output_dir' ]; then
+    output_dir=$2
+    shift 2
+  else
+    shift
+  fi
+done
+cat > "$output_dir/total.srt" <<'EOF'
+1
+00:00:00,000 --> 00:00:01,000
+multilingual text
+EOF
+printf 'multilingual text' > "$output_dir/recog_res_raw"
+printf '[]' > "$output_dir/timestamp"
+"#,
+        )
+        .expect("write streaming helper");
         let video = temp.path().join("recording.wav");
         fs::write(&video, []).expect("write recording");
         let extractor = FunClipExtractor {
