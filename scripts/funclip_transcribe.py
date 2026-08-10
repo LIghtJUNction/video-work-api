@@ -663,6 +663,24 @@ def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
     return merged
 
 
+def _combine_non_overlapping_sentences(sentences: list[dict]) -> dict:
+    """Collapse an already chronological sentence run for overlap repair."""
+
+    if not sentences:
+        raise RuntimeError("cannot combine an empty sentence run")
+    merged = dict(sentences[0])
+    merged["timestamp"] = [list(item) for item in sentences[0]["timestamp"]]
+    for sentence in sentences[1:]:
+        overlap_count = _longest_sentence_token_overlap(
+            _sentence_tokens(merged), _sentence_tokens(sentence)
+        )
+        merged["text"] = _append_sentence_text(
+            merged.get("text"), sentence.get("text"), overlap_count
+        )
+        merged["timestamp"].extend(list(item) for item in sentence["timestamp"])
+    return merged
+
+
 def _contiguous_index_runs(indices: list[int]) -> list[tuple[int, int]]:
     """Return inclusive contiguous runs from an already ordered index list."""
 
@@ -932,12 +950,22 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
                     continue
                 if sentence_start_ms < previous_sentence_end_ms:
                     if all_sentences:
-                        reconciled = _reconcile_overlapping_sentence(
-                            all_sentences[-1], sentence
+                        overlap_start = len(all_sentences) - 1
+                        while overlap_start > 0:
+                            _prior_start, prior_end = _sentence_bounds(
+                                all_sentences[overlap_start - 1]
+                            )
+                            if prior_end <= sentence_start_ms:
+                                break
+                            overlap_start -= 1
+                        combined = _combine_non_overlapping_sentences(
+                            all_sentences[overlap_start:]
                         )
-                        if reconciled is not all_sentences[-1]:
-                            all_sentences[-1] = reconciled
-                            previous_sentence_end_ms = _sentence_bounds(reconciled)[1]
+                        reconciled = _reconcile_overlapping_sentence(
+                            combined, sentence
+                        )
+                        all_sentences[overlap_start:] = [reconciled]
+                        previous_sentence_end_ms = _sentence_bounds(reconciled)[1]
                     continue
                 all_sentences.append(sentence)
                 previous_sentence_end_ms = max(previous_sentence_end_ms, sentence_end_ms)
