@@ -178,6 +178,27 @@ def _validate_sentence_entries(sentences, context: str = "FunASR") -> None:
             )
 
 
+def _validate_timestamp_entries(timestamps, context: str = "FunASR") -> None:
+    """Validate the complete raw timestamp payload before any filtering."""
+
+    if timestamps is None:
+        return
+    if not isinstance(timestamps, (list, tuple)):
+        raise RuntimeError(f"{context} returned non-list timestamps")
+    for index, item in enumerate(timestamps):
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            raise RuntimeError(f"{context} returned malformed timestamp at index {index}")
+        try:
+            start = float(item[0])
+            end = float(item[1])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"{context} returned malformed timestamp at index {index}"
+            ) from exc
+        if not np.isfinite(start) or not np.isfinite(end) or end <= start:
+            raise RuntimeError(f"{context} returned malformed timestamp at index {index}")
+
+
 def _shift_sentences(sentences, offset_ms: int) -> list[dict]:
     shifted: list[dict] = []
     _validate_sentence_entries(sentences)
@@ -291,6 +312,45 @@ def _select_chunk_tokens(
     return raw_text[first_start:last_end], [item[1] for item in selected]
 
 
+def _deduplicate_chunk_tokens(
+    previous_text: str,
+    candidate_text: str,
+    timestamps: list[list[float]],
+    previous_end_ms: float,
+) -> tuple[str, list[list[float]]]:
+    """Remove only lexical overlap and clip genuine next words at the boundary."""
+
+    candidate_spans = _tokenize_with_spans(candidate_text)
+    if len(candidate_spans) != len(timestamps):
+        raise RuntimeError(
+            "FunClip token/timestamp cardinality mismatch while deduplicating chunks: "
+            f"{len(candidate_spans)} tokens, {len(timestamps)} timestamps"
+        )
+    previous_tokens = _tokenize(previous_text)
+    candidate_tokens = [token for token, _start, _end in candidate_spans]
+    overlap_count = _longest_sentence_token_overlap(previous_tokens, candidate_tokens)
+    selected_indices: list[int] = []
+    selected_timestamps: list[list[float]] = []
+    cursor_ms = previous_end_ms
+    for index in range(overlap_count, len(timestamps)):
+        start_ms, end_ms = timestamps[index]
+        start_ms = float(start_ms)
+        end_ms = float(end_ms)
+        if end_ms <= cursor_ms:
+            continue
+        selected_indices.append(index)
+        selected_timestamps.append([max(start_ms, cursor_ms), end_ms])
+        cursor_ms = end_ms
+    if not selected_indices:
+        return "", []
+    selected_text = _sentence_suffix_text(
+        candidate_text, overlap_count, selected_indices
+    )
+    if isinstance(selected_text, list):
+        selected_text = _tokens_to_text(selected_text)
+    return selected_text.lstrip(), selected_timestamps
+
+
 def _append_transcript_part(parts: list[str], text: str) -> None:
     """Join chunk text without inserting spaces between adjacent Han tokens."""
 
@@ -322,7 +382,9 @@ def _sentence_tokens(sentence: dict) -> list[str]:
     return []
 
 
-def _sentence_suffix_text(text, overlap_count: int):
+def _sentence_suffix_text(
+    text, overlap_count: int, selected_indices: list[int] | None = None
+):
     """Return candidate text after ``overlap_count`` lexical tokens.
 
     String sentence text carries punctuation and spacing which are not part of
@@ -332,10 +394,58 @@ def _sentence_suffix_text(text, overlap_count: int):
     """
 
     if isinstance(text, list):
-        return [str(token) for token in text[overlap_count:]]
+        if selected_indices is None:
+            return [str(token) for token in text[overlap_count:]]
+        return [str(text[index]) for index in selected_indices]
     if not isinstance(text, str):
         return ""
     spans = _tokenize_with_spans(text)
+    if selected_indices is not None:
+        if not selected_indices:
+            return ""
+        if any(
+            index < 0 or index >= len(spans)
+            for index in selected_indices
+        ):
+            return ""
+        selected = set(selected_indices)
+        first_index = selected_indices[0]
+        last_index = selected_indices[-1]
+        contiguous = selected_indices == list(range(first_index, last_index + 1))
+        if first_index != overlap_count or not contiguous:
+            # A skipped token means source punctuation can be attached to the
+            # omitted word.  Render only the selected lexical tokens so the
+            # sentence text cannot reintroduce an un-timestamped word.
+            return _tokens_to_text([spans[index][0] for index in selected_indices])
+        if overlap_count:
+            if overlap_count > len(spans):
+                return ""
+            first_start = spans[overlap_count - 1][2]
+        else:
+            first_start = spans[first_index][1]
+
+        # Stop before the first unselected token after the appended suffix, but
+        # keep punctuation/spacing that belongs to the final selected token.
+        last_end = len(text)
+        for index in range(last_index + 1, len(spans)):
+            if index not in selected:
+                last_end = spans[index][1]
+                break
+
+        # Remove skipped lexical tokens from the retained source slice instead
+        # of taking one contiguous span that could re-introduce their text.
+        fragments: list[str] = []
+        cursor = first_start
+        for index, (_token, start, end) in enumerate(spans):
+            if end <= first_start:
+                continue
+            if start >= last_end:
+                break
+            if index not in selected:
+                fragments.append(text[cursor:start])
+                cursor = end
+        fragments.append(text[cursor:last_end])
+        return "".join(fragments)
     if overlap_count <= 0:
         return text
     if overlap_count > len(spans):
@@ -343,18 +453,23 @@ def _sentence_suffix_text(text, overlap_count: int):
     return text[spans[overlap_count - 1][2] :]
 
 
-def _append_sentence_text(previous_text, candidate_text, overlap_count: int):
+def _append_sentence_text(
+    previous_text,
+    candidate_text,
+    overlap_count: int,
+    selected_indices: list[int] | None = None,
+):
     """Append a reconciled candidate suffix without changing text format."""
 
     if isinstance(previous_text, list):
-        suffix = _sentence_suffix_text(candidate_text, overlap_count)
+        suffix = _sentence_suffix_text(candidate_text, overlap_count, selected_indices)
         if isinstance(suffix, list):
             return [str(token) for token in previous_text] + suffix
         return [str(token) for token in previous_text] + _tokenize(suffix)
     if not isinstance(previous_text, str):
         return previous_text
 
-    suffix = _sentence_suffix_text(candidate_text, overlap_count)
+    suffix = _sentence_suffix_text(candidate_text, overlap_count, selected_indices)
     if isinstance(suffix, list):
         suffix = _tokens_to_text(suffix)
     if not suffix:
@@ -410,19 +525,17 @@ def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
     retained instead of being dropped.
     """
 
-    previous_start, previous_end = _sentence_bounds(previous)
-    candidate_start, candidate_end = _sentence_bounds(candidate)
+    _previous_start, previous_end = _sentence_bounds(previous)
+    _candidate_start, candidate_end = _sentence_bounds(candidate)
     previous_tokens = _sentence_tokens(previous)
     candidate_tokens = _sentence_tokens(candidate)
     if candidate_end <= previous_end:
         return previous
-    if candidate_start <= previous_start:
-        return candidate
-    if (
-        candidate_start <= previous_start + 250.0
-        and len(candidate_tokens) >= len(previous_tokens)
+    candidate_has_previous_prefix = (
+        len(candidate_tokens) >= len(previous_tokens)
         and candidate_tokens[: len(previous_tokens)] == previous_tokens
-    ):
+    )
+    if candidate_has_previous_prefix:
         return candidate
 
     previous_timestamps = [list(item) for item in previous["timestamp"]]
@@ -436,6 +549,7 @@ def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
     merged_timestamps = previous_timestamps
     merged_end = previous_end
     previous_overlap_start = len(previous_tokens) - overlap_count
+    appended_indices: list[int] = []
     for index, timestamp in enumerate(candidate_timestamps):
         start, end = float(timestamp[0]), float(timestamp[1])
         if index < overlap_count:
@@ -457,9 +571,13 @@ def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
             continue
         merged_timestamps.append([max(start, merged_end), end])
         merged_end = end
+        appended_indices.append(index)
     merged = dict(previous)
     merged["text"] = _append_sentence_text(
-        previous.get("text"), candidate.get("text"), overlap_count
+        previous.get("text"),
+        candidate.get("text"),
+        overlap_count,
+        appended_indices,
     )
     merged["timestamp"] = merged_timestamps
     return merged
@@ -546,6 +664,7 @@ def _recognize_chunk(clipper, samples: np.ndarray, start: float, duration: float
         return []
 
     raw_text = state.get("recog_res_raw") or ""
+    _validate_timestamp_entries(state.get("timestamp"))
     timestamps = _shift_timestamps(state.get("timestamp"), 0)
     if model_name == "paraformer" and _token_count(str(raw_text)) != len(timestamps):
         if duration <= MIN_RETRY_SECONDS or samples.size < SAMPLE_RATE * MIN_RETRY_SECONDS:
@@ -605,7 +724,10 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
         decode_duration = decode_end - decode_start
         samples = _decode_chunk(path, decode_start, decode_duration)
         if samples.size == 0:
-            break
+            raise RuntimeError(
+                "ffmpeg returned no audio samples for recording chunk "
+                f"{decode_start:.3f}-{decode_end:.3f}s"
+            )
         recognized = _recognize_chunk(
             clipper, samples, decode_start, decode_duration, model_name
         )
@@ -632,8 +754,14 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
                 selected_text, selected_timestamps = _select_chunk_tokens(
                     str(raw_text),
                     chunk_timestamps,
-                    max(logical_start_ms, previous_word_end_ms),
+                    logical_start_ms,
                     logical_end_ms,
+                )
+                selected_text, selected_timestamps = _deduplicate_chunk_tokens(
+                    "".join(all_raw_text),
+                    selected_text,
+                    selected_timestamps,
+                    previous_word_end_ms,
                 )
                 if selected_timestamps:
                     _append_transcript_part(all_raw_text, selected_text)

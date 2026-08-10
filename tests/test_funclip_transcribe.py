@@ -48,6 +48,56 @@ class OverlappingSentenceTests(unittest.TestCase):
         self.assertEqual(len(MODULE._sentence_tokens(merged)), 3)
         self.assertEqual(len(merged["timestamp"]), 3)
 
+    def test_preserves_prefix_for_a_backward_sentence_shift(self):
+        previous = {
+            "text": "short prefix",
+            "timestamp": [[100, 200], [200, 300]],
+        }
+        candidate = {
+            "text": "prefix suffix",
+            "timestamp": [[95, 205], [205, 350]],
+        }
+
+        merged = MODULE._reconcile_overlapping_sentence(previous, candidate)
+
+        self.assertEqual(merged["text"], "short prefix suffix")
+        self.assertEqual(len(MODULE._sentence_tokens(merged)), 3)
+        self.assertEqual(len(merged["timestamp"]), 3)
+
+    def test_chunk_dedup_keeps_a_distinct_word_that_overlaps_previous_end(self):
+        text, timestamps = MODULE._deduplicate_chunk_tokens(
+            "prior", "next word", [[150, 250], [250, 350]], 200
+        )
+
+        self.assertEqual(text, "next word")
+        self.assertEqual(timestamps, [[200, 250], [250, 350]])
+
+    def test_chunk_dedup_removes_only_a_repeated_prefix(self):
+        text, timestamps = MODULE._deduplicate_chunk_tokens(
+            "alpha beta", "beta gamma", [[150, 250], [250, 350]], 200
+        )
+
+        self.assertEqual(text, "gamma")
+        self.assertEqual(timestamps, [[250, 350]])
+
+    def test_sentence_merge_drops_a_skipped_candidate_token(self):
+        previous = {
+            "text": "prior",
+            "timestamp": [[0, 200]],
+        }
+        candidate = {
+            "text": "revised next",
+            "timestamp": [[150, 180], [180, 300]],
+        }
+
+        merged = MODULE._reconcile_overlapping_sentence(previous, candidate)
+
+        self.assertEqual(merged["text"], "prior next")
+        self.assertEqual(merged["timestamp"], [[0, 200], [200.0, 300.0]])
+        self.assertEqual(
+            len(MODULE._sentence_tokens(merged)), len(merged["timestamp"])
+        )
+
 
 class SentenceValidationTests(unittest.TestCase):
     def test_rejects_malformed_nested_sentence_timestamps(self):
@@ -60,6 +110,12 @@ class SentenceValidationTests(unittest.TestCase):
     def test_rejects_non_object_nested_sentences(self):
         with self.assertRaisesRegex(RuntimeError, "non-object sentence"):
             MODULE._shift_sentences(["not a sentence"], 0)
+
+    def test_rejects_malformed_top_level_timestamp_before_filtering(self):
+        with self.assertRaisesRegex(RuntimeError, "malformed timestamp"):
+            MODULE._validate_timestamp_entries(
+                [[0, 100], ["bad", 200], [200, 300]]
+            )
 
     def test_preserves_string_punctuation_when_extending_sentence(self):
         previous = {
