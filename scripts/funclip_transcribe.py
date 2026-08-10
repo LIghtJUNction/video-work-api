@@ -285,6 +285,72 @@ def _append_transcript_part(parts: list[str], text: str) -> None:
         parts.append(" " + text)
 
 
+def _sentence_bounds(sentence: dict) -> tuple[float, float]:
+    timestamps = sentence.get("timestamp") or []
+    if not timestamps:
+        raise RuntimeError("FunClip produced a sentence without timestamps")
+    return float(timestamps[0][0]), float(timestamps[-1][1])
+
+
+def _sentence_tokens(sentence: dict) -> list[str]:
+    text = sentence.get("text")
+    if isinstance(text, list):
+        return [str(token) for token in text]
+    if isinstance(text, str):
+        return _tokenize(text)
+    return []
+
+
+def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
+    """Keep the complete sentence emitted by an overlapping context window.
+
+    A long utterance can be truncated at the right edge of one window and be
+    returned in full by the next window.  Prefer that later complete result
+    when it has the same (or earlier) start.  If model segmentation shifts the
+    start forward, append only the candidate suffix so the earlier prefix is
+    retained instead of being dropped.
+    """
+
+    previous_start, previous_end = _sentence_bounds(previous)
+    candidate_start, candidate_end = _sentence_bounds(candidate)
+    if candidate_end <= previous_end:
+        return previous
+    if candidate_start <= previous_start + 250.0:
+        return candidate
+
+    previous_timestamps = [list(item) for item in previous["timestamp"]]
+    candidate_timestamps = candidate["timestamp"]
+    previous_tokens = _sentence_tokens(previous)
+    candidate_tokens = _sentence_tokens(candidate)
+    if len(previous_tokens) != len(previous_timestamps) or len(candidate_tokens) != len(
+        candidate_timestamps
+    ):
+        return candidate
+
+    merged_tokens = list(previous_tokens)
+    merged_timestamps = previous_timestamps
+    merged_end = previous_end
+    for token, timestamp in zip(candidate_tokens, candidate_timestamps):
+        start, end = float(timestamp[0]), float(timestamp[1])
+        if end <= merged_end:
+            continue
+        if (
+            merged_tokens
+            and token == merged_tokens[-1]
+            and start < merged_end
+        ):
+            merged_timestamps[-1][1] = max(merged_timestamps[-1][1], end)
+            merged_end = merged_timestamps[-1][1]
+            continue
+        merged_tokens.append(token)
+        merged_timestamps.append([max(start, merged_end), end])
+        merged_end = end
+    merged = dict(previous)
+    merged["text"] = merged_tokens
+    merged["timestamp"] = merged_timestamps
+    return merged
+
+
 def _validate_timeline(sentences: list[dict], timestamps: list[list[float]], duration: float) -> None:
     """Reject output that cannot be trusted as a chronological recording."""
 
@@ -410,7 +476,6 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
     chunk_start = 0.0
     while chunk_start < duration:
         chunk_duration = min(CHUNK_SECONDS, duration - chunk_start)
-        logical_start_ms = chunk_start * 1000.0
         logical_end_ms = (chunk_start + chunk_duration) * 1000.0
         decode_start = max(0.0, chunk_start - CHUNK_OVERLAP_SECONDS)
         decode_end = min(duration, chunk_start + chunk_duration + CHUNK_OVERLAP_SECONDS)
@@ -424,17 +489,17 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
         for sub_start, _sub_duration, state in recognized:
             offset_ms = round(sub_start * 1000)
             for sentence in _shift_sentences(state.get("sentences"), offset_ms):
-                sentence_timestamps = sentence.get("timestamp") or []
-                sentence_start_ms = float(sentence_timestamps[0][0])
-                sentence_end_ms = float(sentence_timestamps[-1][1])
-                # The overlap is recognition-only context.  A sentence is
-                # owned by the chunk containing its first timestamp, which
-                # prevents duplicate boundary segments in the final SRT.
-                if sentence_start_ms < logical_start_ms:
-                    continue
+                sentence_start_ms, sentence_end_ms = _sentence_bounds(sentence)
                 if sentence_start_ms >= logical_end_ms:
                     continue
                 if sentence_start_ms < previous_sentence_end_ms:
+                    if all_sentences:
+                        reconciled = _reconcile_overlapping_sentence(
+                            all_sentences[-1], sentence
+                        )
+                        if reconciled is not all_sentences[-1]:
+                            all_sentences[-1] = reconciled
+                            previous_sentence_end_ms = _sentence_bounds(reconciled)[1]
                     continue
                 all_sentences.append(sentence)
                 previous_sentence_end_ms = max(previous_sentence_end_ms, sentence_end_ms)
