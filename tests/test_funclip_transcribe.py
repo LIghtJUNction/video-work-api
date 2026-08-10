@@ -158,6 +158,16 @@ class SentenceValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "non-object sentence"):
             MODULE._shift_sentences(["not a sentence"], 0)
 
+    def test_rejects_out_of_order_sentence_entries(self):
+        with self.assertRaisesRegex(RuntimeError, "out-of-order sentence"):
+            MODULE._shift_sentences(
+                [
+                    {"text": "later", "timestamp": [[200, 300]]},
+                    {"text": "earlier", "timestamp": [[100, 200]]},
+                ],
+                0,
+            )
+
     def test_rejects_malformed_top_level_timestamp_before_filtering(self):
         with self.assertRaisesRegex(RuntimeError, "malformed timestamp"):
             MODULE._validate_timestamp_entries(
@@ -185,6 +195,21 @@ class SentenceValidationTests(unittest.TestCase):
         self.assertEqual(
             len(MODULE._sentence_tokens(merged)), len(merged["timestamp"])
         )
+
+    def test_keeps_prior_sentence_when_token_timestamps_are_unreliable(self):
+        previous = {
+            "text": "trusted prefix",
+            "timestamp": [[0, 100]],
+        }
+        candidate = {
+            "text": "trusted prefix and more",
+            "timestamp": [[90, 200]],
+        }
+
+        merged = MODULE._reconcile_overlapping_sentence(previous, candidate)
+
+        self.assertIs(merged, previous)
+        self.assertEqual(merged["text"], "trusted prefix")
 
     def test_aligns_sentence_text_to_the_raw_word_timeline(self):
         sentences = [

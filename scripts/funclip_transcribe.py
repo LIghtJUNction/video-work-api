@@ -163,6 +163,7 @@ def _validate_sentence_entries(sentences, context: str = "FunASR") -> None:
         return
     if not isinstance(sentences, (list, tuple)):
         raise RuntimeError(f"{context} returned non-list sentence information")
+    previous_sentence_end = 0.0
     for index, sentence in enumerate(sentences):
         if not isinstance(sentence, dict):
             raise RuntimeError(f"{context} returned a non-object sentence at index {index}")
@@ -179,6 +180,13 @@ def _validate_sentence_entries(sentences, context: str = "FunASR") -> None:
             raise RuntimeError(
                 f"{context} returned malformed timestamps at sentence index {index}"
             ) from exc
+        sentence_start = float(raw_timestamps[0][0])
+        sentence_end = float(raw_timestamps[-1][1])
+        if sentence_start < previous_sentence_end:
+            raise RuntimeError(
+                f"{context} returned out-of-order sentence at index {index}"
+            )
+        previous_sentence_end = sentence_end
 
 
 def _validate_timestamp_entries(timestamps, context: str = "FunASR") -> None:
@@ -583,14 +591,17 @@ def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
         len(candidate_tokens) >= len(previous_tokens)
         and candidate_tokens[: len(previous_tokens)] == previous_tokens
     )
-    if candidate_has_previous_prefix and _candidate_start >= _previous_start:
-        return candidate
-
     previous_timestamps = [list(item) for item in previous["timestamp"]]
     candidate_timestamps = candidate["timestamp"]
     if len(previous_tokens) != len(previous_timestamps) or len(candidate_tokens) != len(
         candidate_timestamps
     ):
+        # SenseVoice does not promise one timestamp per lexical token.  A
+        # wholesale candidate replacement would therefore publish text that
+        # cannot be justified by its timestamps and could discard the already
+        # recognized prefix.  Retain the trusted prior sentence instead.
+        return previous
+    if candidate_has_previous_prefix and _candidate_start >= _previous_start:
         return candidate
 
     overlap_count = _longest_sentence_token_overlap(previous_tokens, candidate_tokens)
@@ -676,19 +687,29 @@ def _align_sentences_to_words(
 
     assignments: list[list[int]] = [[] for _ in sentences]
     unassigned: list[int] = []
+    interval_cursor = 0
+    active_intervals: list[tuple[float, float, int]] = []
     for word_index, timestamp in enumerate(timestamps):
         start, end = float(timestamp[0]), float(timestamp[1])
-        candidates: list[tuple[float, float, int]] = []
-        for sentence_start, sentence_end, sentence_index in intervals:
+        while interval_cursor < len(intervals) and intervals[interval_cursor][0] < end:
+            active_intervals.append(intervals[interval_cursor])
+            interval_cursor += 1
+        active_intervals = [
+            item for item in active_intervals if item[1] > start
+        ]
+        best: tuple[float, float, int] | None = None
+        for sentence_start, sentence_end, sentence_index in active_intervals:
             overlap = min(end, sentence_end) - max(start, sentence_start)
             if overlap > 0:
-                candidates.append((overlap, sentence_start, sentence_index))
-        if not candidates:
+                candidate = (overlap, sentence_start, sentence_index)
+                if best is None or (
+                    candidate[0], -candidate[1], -candidate[2]
+                ) > (best[0], -best[1], -best[2]):
+                    best = candidate
+        if best is None:
             unassigned.append(word_index)
             continue
-        _overlap, _sentence_start, sentence_index = max(
-            candidates, key=lambda item: (item[0], -item[1], -item[2])
-        )
+        _overlap, _sentence_start, sentence_index = best
         assignments[sentence_index].append(word_index)
 
     events: list[tuple[int, dict]] = []
