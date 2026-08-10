@@ -596,11 +596,32 @@ def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
     if len(previous_tokens) != len(previous_timestamps) or len(candidate_tokens) != len(
         candidate_timestamps
     ):
-        # SenseVoice does not promise one timestamp per lexical token.  A
-        # wholesale candidate replacement would therefore publish text that
-        # cannot be justified by its timestamps and could discard the already
-        # recognized prefix.  Retain the trusted prior sentence instead.
-        return previous
+        # SenseVoice does not promise one timestamp per lexical token.  Keep
+        # the trusted prior timing and append only the candidate's time tail;
+        # the lexical suffix is merged by sentence text, not paired with
+        # individual word timestamps.
+        overlap_count = _longest_sentence_token_overlap(
+            previous_tokens, candidate_tokens
+        )
+        merged_end = previous_end
+        candidate_tail: list[list[float]] = []
+        for timestamp in candidate_timestamps:
+            start, end = float(timestamp[0]), float(timestamp[1])
+            if end <= merged_end:
+                continue
+            start = max(start, merged_end)
+            if end <= start:
+                continue
+            candidate_tail.append([start, end])
+            merged_end = end
+        if not candidate_tail:
+            candidate_tail = [[previous_end, candidate_end]]
+        merged = dict(previous)
+        merged["text"] = _append_sentence_text(
+            previous.get("text"), candidate.get("text"), overlap_count
+        )
+        merged["timestamp"] = previous_timestamps + candidate_tail
+        return merged
     if candidate_has_previous_prefix and _candidate_start >= _previous_start:
         return candidate
 

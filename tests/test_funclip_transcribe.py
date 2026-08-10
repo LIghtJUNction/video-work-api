@@ -196,7 +196,7 @@ class SentenceValidationTests(unittest.TestCase):
             len(MODULE._sentence_tokens(merged)), len(merged["timestamp"])
         )
 
-    def test_keeps_prior_sentence_when_token_timestamps_are_unreliable(self):
+    def test_merges_sentence_bounds_when_token_timestamps_are_unreliable(self):
         previous = {
             "text": "trusted prefix",
             "timestamp": [[0, 100]],
@@ -208,8 +208,8 @@ class SentenceValidationTests(unittest.TestCase):
 
         merged = MODULE._reconcile_overlapping_sentence(previous, candidate)
 
-        self.assertIs(merged, previous)
-        self.assertEqual(merged["text"], "trusted prefix")
+        self.assertEqual(merged["text"], "trusted prefix and more")
+        self.assertEqual(merged["timestamp"], [[0, 100], [100.0, 200.0]])
 
     def test_aligns_sentence_text_to_the_raw_word_timeline(self):
         sentences = [
