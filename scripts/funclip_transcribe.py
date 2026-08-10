@@ -534,12 +534,20 @@ def _tokens_to_text(tokens: list[str]) -> str:
     """Render lexical tokens using FunClip's Han/word spacing convention."""
 
     rendered = ""
+    previous_token = ""
     for token in tokens:
         if not token:
             continue
-        if rendered and not (_is_han(rendered[-1]) and _is_han(token[0])):
+        adjacent_han = (
+            len(previous_token) == 1
+            and len(token) == 1
+            and _is_han(previous_token)
+            and _is_han(token)
+        )
+        if rendered and not adjacent_han:
             rendered += " "
         rendered += token
+        previous_token = token
     return rendered
 
 
@@ -694,7 +702,14 @@ def _align_sentences_to_words(
         tokens = raw_tokens[first_index : last_index + 1]
         item = dict(source_sentence) if source_sentence is not None else {}
         if source_sentence is not None and _sentence_tokens(source_sentence) == tokens:
-            item["text"] = source_sentence.get("text")
+            source_text = source_sentence.get("text")
+            # FunClip's Text2SRT renderer concatenates a list item containing a
+            # mixed-script token (`oppo`, `还`) without a separator.  Render
+            # list-backed sentences through the same token-aware joiner used
+            # for synthetic segments so SRT text cannot merge two word tokens.
+            item["text"] = (
+                _tokens_to_text(tokens) if isinstance(source_text, list) else source_text
+            )
         else:
             item["text"] = _tokens_to_text(tokens)
         item["timestamp"] = [list(timestamps[index]) for index in indices]
