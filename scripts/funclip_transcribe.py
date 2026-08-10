@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
+import os
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 import numpy as np
@@ -25,14 +26,41 @@ SAMPLE_RATE = 16_000
 # Keep enough context for sentence timestamps while preventing long recordings
 # from turning one FunASR request into a duration-sized memory allocation.
 CHUNK_SECONDS = 60.0
+# Keep one second of acoustic context on both sides of a chunk boundary. The
+# merge step below assigns each timestamp to the first chunk that owns it.
+CHUNK_OVERLAP_SECONDS = 1.0
 # A shorter retry makes Paraformer token/timestamp alignment resilient to a
 # pathological long chunk without allowing an unbounded number of retries.
 MIN_RETRY_SECONDS = 5.0
-TOKEN_RE = re.compile(r"[\u4e00-\u9fff]|[\w-]+(?:['’][\w-]+)*", re.UNICODE)
+HAN_RANGES = (
+    (0x3400, 0x4DBF),
+    (0x4E00, 0x9FFF),
+    (0xF900, 0xFAFF),
+    (0x20000, 0x2A6DF),
+    (0x2A700, 0x2B73F),
+    (0x2B740, 0x2B81F),
+    (0x2B820, 0x2CEAF),
+    (0x2CEB0, 0x2EBEF),
+    (0x2EBF0, 0x2EE5F),
+    (0x2F800, 0x2FA1F),
+    (0x30000, 0x3134F),
+    (0x31350, 0x323AF),
+)
+HAN_NAME_PREFIXES = (
+    "CJK UNIFIED IDEOGRAPH-",
+    "CJK COMPATIBILITY IDEOGRAPH-",
+)
+WORD_JOINERS = frozenset(("_", "-"))
+APOSTROPHES = frozenset(("'", "’"))
 
 
 def _funclip_root() -> Path:
-    root = Path(__file__).resolve().parents[1] / "vendor" / "FunClip"
+    configured = os.environ.get("VWA_FUNCLIP_ROOT")
+    root = (
+        Path(configured)
+        if configured
+        else Path(__file__).resolve().parents[1] / "vendor" / "FunClip"
+    )
     if not root.is_dir():
         raise RuntimeError(f"FunClip root is unavailable: {root}")
     # FunClip's vendored module imports ``utils`` as a top-level package when
@@ -140,7 +168,121 @@ def _shift_sentences(sentences, offset_ms: int) -> list[dict]:
 def _token_count(text: str) -> int:
     """Match Rust's word parser before publishing any token timestamps."""
 
-    return sum(1 for _ in TOKEN_RE.finditer(text))
+    return len(_tokenize(text))
+
+
+def _is_han(character: str) -> bool:
+    codepoint = ord(character)
+    if not any(start <= codepoint <= end for start, end in HAN_RANGES):
+        return False
+    # The Rust regex property excludes unassigned code points inside the
+    # Unicode blocks.  Names provide the same assigned-ideograph check in
+    # Python while still covering every current Han extension range.
+    return unicodedata.name(character, "").startswith(HAN_NAME_PREFIXES)
+
+
+def _is_word_character(character: str) -> bool:
+    return character.isalnum() or character in WORD_JOINERS
+
+
+def _tokenize(text: str) -> list[str]:
+    """Mirror Rust's Han/letter/number token contract without ``\\p{}`` support."""
+
+    return [token for token, _start, _end in _tokenize_with_spans(text)]
+
+
+def _tokenize_with_spans(text: str) -> list[tuple[str, int, int]]:
+    """Return Rust-compatible tokens together with their source spans."""
+
+    tokens: list[tuple[str, int, int]] = []
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if _is_han(character):
+            tokens.append((character, index, index + 1))
+            index += 1
+            continue
+        if not _is_word_character(character):
+            index += 1
+            continue
+        start = index
+        index += 1
+        while index < len(text):
+            character = text[index]
+            if _is_word_character(character):
+                index += 1
+                continue
+            if (
+                character in APOSTROPHES
+                and index + 1 < len(text)
+                and _is_word_character(text[index + 1])
+            ):
+                index += 2
+                continue
+            break
+        tokens.append((text[start:index], start, index))
+    return tokens
+
+
+def _select_chunk_tokens(
+    raw_text: str,
+    timestamps: list[list[float]],
+    lower_bound_ms: float,
+    upper_bound_ms: float,
+) -> tuple[str, list[list[float]]]:
+    """Select the first-owner words for one logical chunk.
+
+    Recognition windows overlap so FunASR can see speech at a boundary.  Only
+    words whose starts belong to the logical chunk are published; this keeps
+    the overlap out of the final wire payload while retaining the surrounding
+    acoustic context during recognition.
+    """
+
+    token_spans = _tokenize_with_spans(raw_text)
+    if len(token_spans) != len(timestamps):
+        raise RuntimeError(
+            "FunClip token/timestamp cardinality mismatch while merging chunks: "
+            f"{len(token_spans)} tokens, {len(timestamps)} timestamps"
+        )
+    selected: list[tuple[int, list[float]]] = []
+    for index, (_token, _start, _end) in enumerate(token_spans):
+        timestamp = timestamps[index]
+        if not isinstance(timestamp, (list, tuple)) or len(timestamp) != 2:
+            continue
+        try:
+            start_ms = float(timestamp[0])
+            end_ms = float(timestamp[1])
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(start_ms) or not np.isfinite(end_ms) or end_ms <= start_ms:
+            continue
+        if start_ms < lower_bound_ms:
+            continue
+        if start_ms >= upper_bound_ms:
+            break
+        selected.append((index, [start_ms, end_ms]))
+    if not selected:
+        return "", []
+    first_index = selected[0][0]
+    last_index = selected[-1][0]
+    first_start = token_spans[first_index][1]
+    last_end = token_spans[last_index][2]
+    return raw_text[first_start:last_end], [item[1] for item in selected]
+
+
+def _append_transcript_part(parts: list[str], text: str) -> None:
+    """Join chunk text without inserting spaces between adjacent Han tokens."""
+
+    if not text:
+        return
+    if not parts:
+        parts.append(text)
+        return
+    previous = parts[-1]
+    if previous and _is_han(previous[-1]) and _is_han(text[0]):
+        parts.append(text)
+    else:
+        parts.append(" " + text)
 
 
 def _validate_timeline(sentences: list[dict], timestamps: list[list[float]], duration: float) -> None:
@@ -165,6 +307,45 @@ def _validate_timeline(sentences: list[dict], timestamps: list[list[float]], dur
         previous_end = end
 
 
+def _recognize_once(clipper, samples: np.ndarray, model_name: str):
+    """Run one FunASR request and distinguish an empty result explicitly."""
+
+    if model_name != "paraformer":
+        # SenseVoice has a different generate contract; let its implementation
+        # raise if it returns a malformed result rather than swallowing an
+        # IndexError from an unrelated code path.
+        _text, _srt, state = clipper.recog((SAMPLE_RATE, samples))
+        return state
+
+    from funclip.videoclipper import _normalize_recognition_result
+    from funclip.utils.trans_utils import convert_pcm_to_float
+
+    data = convert_pcm_to_float(samples)
+    result = clipper.funasr_model.generate(
+        data,
+        return_spk_res=False,
+        sentence_timestamp=True,
+        return_raw_text=True,
+        is_final=True,
+        hotword="",
+        output_dir=None,
+        pred_timestamp=clipper.lang == "en",
+        en_post_proc=clipper.lang == "en",
+        cache={},
+    )
+    if not result:
+        return None
+    if not isinstance(result[0], dict):
+        raise RuntimeError("FunASR returned a non-object recognition result")
+    _text, raw_text, timestamps, sentences = _normalize_recognition_result(result[0])
+    return {
+        "audio_input": (SAMPLE_RATE, data),
+        "recog_res_raw": raw_text,
+        "timestamp": timestamps,
+        "sentences": sentences,
+    }
+
+
 def _recognize_chunk(clipper, samples: np.ndarray, start: float, duration: float, model_name: str):
     """Recognize one chunk, splitting it when Paraformer alignment is bad.
 
@@ -173,17 +354,10 @@ def _recognize_chunk(clipper, samples: np.ndarray, start: float, duration: float
     windows preserves the transcript while keeping the strict wire contract.
     """
 
-    try:
-        _text, _srt, state = clipper.recog((SAMPLE_RATE, samples))
-    except IndexError as exc:
-        # FunASR's Paraformer wrapper returns an empty list for a fully silent
-        # chunk; FunClip then indexes ``rec_result[0]`` and leaks that as
-        # ``IndexError``.  A long recording may legitimately contain such a
-        # chunk, so treat only this known empty-result shape as silence.
-        if str(exc) != "list index out of range":
-            raise
+    state = _recognize_once(clipper, samples, model_name)
+    if state is None:
         print(
-            f"FunClip returned no recognition for chunk "
+            f"FunASR returned no recognition result for chunk "
             f"{start:.3f}-{start + duration:.3f}s; skipping",
             file=sys.stderr,
         )
@@ -231,23 +405,52 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
     all_sentences: list[dict] = []
     all_raw_text: list[str] = []
     all_timestamps: list[list[float]] = []
+    previous_sentence_end_ms = 0.0
+    previous_word_end_ms = 0.0
     chunk_start = 0.0
     while chunk_start < duration:
         chunk_duration = min(CHUNK_SECONDS, duration - chunk_start)
-        samples = _decode_chunk(path, chunk_start, chunk_duration)
+        logical_start_ms = chunk_start * 1000.0
+        logical_end_ms = (chunk_start + chunk_duration) * 1000.0
+        decode_start = max(0.0, chunk_start - CHUNK_OVERLAP_SECONDS)
+        decode_end = min(duration, chunk_start + chunk_duration + CHUNK_OVERLAP_SECONDS)
+        decode_duration = decode_end - decode_start
+        samples = _decode_chunk(path, decode_start, decode_duration)
         if samples.size == 0:
             break
         recognized = _recognize_chunk(
-            clipper, samples, chunk_start, chunk_duration, model_name
+            clipper, samples, decode_start, decode_duration, model_name
         )
         for sub_start, _sub_duration, state in recognized:
             offset_ms = round(sub_start * 1000)
-            all_sentences.extend(_shift_sentences(state.get("sentences"), offset_ms))
+            for sentence in _shift_sentences(state.get("sentences"), offset_ms):
+                sentence_timestamps = sentence.get("timestamp") or []
+                sentence_start_ms = float(sentence_timestamps[0][0])
+                sentence_end_ms = float(sentence_timestamps[-1][1])
+                # The overlap is recognition-only context.  A sentence is
+                # owned by the chunk containing its first timestamp, which
+                # prevents duplicate boundary segments in the final SRT.
+                if sentence_start_ms < logical_start_ms:
+                    continue
+                if sentence_start_ms >= logical_end_ms:
+                    continue
+                if sentence_start_ms < previous_sentence_end_ms:
+                    continue
+                all_sentences.append(sentence)
+                previous_sentence_end_ms = max(previous_sentence_end_ms, sentence_end_ms)
             raw_text = state.get("recog_res_raw") or ""
             chunk_timestamps = _shift_timestamps(state.get("timestamp"), offset_ms)
-            if raw_text:
-                all_raw_text.append(str(raw_text))
-            all_timestamps.extend(chunk_timestamps)
+            if model_name == "paraformer" and raw_text:
+                selected_text, selected_timestamps = _select_chunk_tokens(
+                    str(raw_text),
+                    chunk_timestamps,
+                    max(logical_start_ms, previous_word_end_ms),
+                    logical_end_ms,
+                )
+                if selected_timestamps:
+                    _append_transcript_part(all_raw_text, selected_text)
+                    all_timestamps.extend(selected_timestamps)
+                    previous_word_end_ms = selected_timestamps[-1][1]
         chunk_start += chunk_duration
 
     if not all_sentences:
@@ -261,7 +464,7 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
     if not srt.strip():
         raise RuntimeError("FunClip produced an empty SRT file")
     (output_dir / "total.srt").write_text(srt, encoding="utf-8")
-    (output_dir / "recog_res_raw").write_text(" ".join(all_raw_text), encoding="utf-8")
+    (output_dir / "recog_res_raw").write_text("".join(all_raw_text), encoding="utf-8")
     (output_dir / "timestamp").write_text(
         json.dumps(all_timestamps, separators=(",", ":")), encoding="utf-8"
     )
