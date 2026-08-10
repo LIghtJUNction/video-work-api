@@ -476,6 +476,7 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
     chunk_start = 0.0
     while chunk_start < duration:
         chunk_duration = min(CHUNK_SECONDS, duration - chunk_start)
+        logical_start_ms = chunk_start * 1000.0
         logical_end_ms = (chunk_start + chunk_duration) * 1000.0
         decode_start = max(0.0, chunk_start - CHUNK_OVERLAP_SECONDS)
         decode_end = min(duration, chunk_start + chunk_duration + CHUNK_OVERLAP_SECONDS)
