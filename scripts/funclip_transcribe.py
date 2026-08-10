@@ -671,11 +671,11 @@ def _combine_non_overlapping_sentences(sentences: list[dict]) -> dict:
     merged = dict(sentences[0])
     merged["timestamp"] = [list(item) for item in sentences[0]["timestamp"]]
     for sentence in sentences[1:]:
-        overlap_count = _longest_sentence_token_overlap(
-            _sentence_tokens(merged), _sentence_tokens(sentence)
-        )
+        # These entries are already chronological and non-overlapping.  Equal
+        # text is a legitimate repeated utterance here; lexical de-duplication
+        # belongs only to acoustic/timestamp overlap reconciliation.
         merged["text"] = _append_sentence_text(
-            merged.get("text"), sentence.get("text"), overlap_count
+            merged.get("text"), sentence.get("text"), 0
         )
         merged["timestamp"].extend(list(item) for item in sentence["timestamp"])
     return merged

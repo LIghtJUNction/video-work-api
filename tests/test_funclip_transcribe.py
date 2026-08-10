@@ -228,6 +228,17 @@ class SentenceValidationTests(unittest.TestCase):
         self.assertEqual(merged["text"], "hello world continued")
         self.assertEqual(merged["timestamp"], [[0, 100], [100, 200], [200.0, 300.0]])
 
+    def test_combines_distinct_repeated_sentences_without_lexical_deduplication(self):
+        combined = MODULE._combine_non_overlapping_sentences(
+            [
+                {"text": "yes", "timestamp": [[0, 100]]},
+                {"text": "yes", "timestamp": [[100, 200]]},
+            ]
+        )
+
+        self.assertEqual(combined["text"], "yes yes")
+        self.assertEqual(combined["timestamp"], [[0, 100], [100, 200]])
+
     def test_aligns_sentence_text_to_the_raw_word_timeline(self):
         sentences = [
             {"text": "prior duplicate", "timestamp": [[0, 200]]},
