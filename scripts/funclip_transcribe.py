@@ -156,14 +156,33 @@ def _shift_timestamps(timestamps, offset_ms: int) -> list[list[float]]:
     return shifted
 
 
+def _validate_sentence_entries(sentences, context: str = "FunASR") -> None:
+    """Reject malformed nested sentence entries instead of treating them as silence."""
+
+    if sentences is None:
+        return
+    if not isinstance(sentences, (list, tuple)):
+        raise RuntimeError(f"{context} returned non-list sentence information")
+    for index, sentence in enumerate(sentences):
+        if not isinstance(sentence, dict):
+            raise RuntimeError(f"{context} returned a non-object sentence at index {index}")
+        raw_timestamps = sentence.get("timestamp")
+        if not isinstance(raw_timestamps, (list, tuple)) or not raw_timestamps:
+            raise RuntimeError(
+                f"{context} returned a sentence without valid timestamps at index {index}"
+            )
+        shifted = _shift_timestamps(raw_timestamps, 0)
+        if len(shifted) != len(raw_timestamps):
+            raise RuntimeError(
+                f"{context} returned malformed timestamps at sentence index {index}"
+            )
+
+
 def _shift_sentences(sentences, offset_ms: int) -> list[dict]:
     shifted: list[dict] = []
+    _validate_sentence_entries(sentences)
     for sentence in sentences or []:
-        if not isinstance(sentence, dict):
-            continue
         timestamps = _shift_timestamps(sentence.get("timestamp"), offset_ms)
-        if not timestamps:
-            continue
         item = dict(sentence)
         item["timestamp"] = timestamps
         shifted.append(item)
@@ -393,26 +412,31 @@ def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
 
     previous_start, previous_end = _sentence_bounds(previous)
     candidate_start, candidate_end = _sentence_bounds(candidate)
+    previous_tokens = _sentence_tokens(previous)
+    candidate_tokens = _sentence_tokens(candidate)
     if candidate_end <= previous_end:
         return previous
-    if candidate_start <= previous_start + 250.0:
+    if candidate_start <= previous_start:
+        return candidate
+    if (
+        candidate_start <= previous_start + 250.0
+        and len(candidate_tokens) >= len(previous_tokens)
+        and candidate_tokens[: len(previous_tokens)] == previous_tokens
+    ):
         return candidate
 
     previous_timestamps = [list(item) for item in previous["timestamp"]]
     candidate_timestamps = candidate["timestamp"]
-    previous_tokens = _sentence_tokens(previous)
-    candidate_tokens = _sentence_tokens(candidate)
     if len(previous_tokens) != len(previous_timestamps) or len(candidate_tokens) != len(
         candidate_timestamps
     ):
         return candidate
 
     overlap_count = _longest_sentence_token_overlap(previous_tokens, candidate_tokens)
-    merged_tokens = list(previous_tokens)
     merged_timestamps = previous_timestamps
     merged_end = previous_end
     previous_overlap_start = len(previous_tokens) - overlap_count
-    for index, (token, timestamp) in enumerate(zip(candidate_tokens, candidate_timestamps)):
+    for index, timestamp in enumerate(candidate_timestamps):
         start, end = float(timestamp[0]), float(timestamp[1])
         if index < overlap_count:
             previous_index = previous_overlap_start + index
@@ -431,7 +455,6 @@ def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
             continue
         if end <= merged_end:
             continue
-        merged_tokens.append(token)
         merged_timestamps.append([max(start, merged_end), end])
         merged_end = end
     merged = dict(previous)
@@ -472,6 +495,7 @@ def _recognize_once(clipper, samples: np.ndarray, model_name: str):
         # raise if it returns a malformed result rather than swallowing an
         # IndexError from an unrelated code path.
         _text, _srt, state = clipper.recog((SAMPLE_RATE, samples))
+        _validate_sentence_entries(state.get("sentences"))
         return state
 
     from funclip.videoclipper import _normalize_recognition_result
@@ -494,6 +518,7 @@ def _recognize_once(clipper, samples: np.ndarray, model_name: str):
         return None
     if not isinstance(result[0], dict):
         raise RuntimeError("FunASR returned a non-object recognition result")
+    _validate_sentence_entries(result[0].get("sentence_info"))
     _text, raw_text, timestamps, sentences = _normalize_recognition_result(result[0])
     return {
         "audio_input": (SAMPLE_RATE, data),

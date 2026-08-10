@@ -263,17 +263,20 @@ impl FunClipExtractor {
     /// ffmpeg-decoded chunks instead of asking librosa to materialize a whole
     /// multi-hour recording in one array.
     fn audio_transcriber(&self) -> Option<PathBuf> {
-        let project_root = std::env::var_os("VWA_PROJECT_ROOT")
-            .map(PathBuf::from)
-            .or_else(|| {
-                self.root
-                    .as_ref()?
-                    .parent()?
-                    .parent()
-                    .map(Path::to_path_buf)
-            })?;
-        let script = project_root.join("scripts").join("funclip_transcribe.py");
-        script.is_file().then_some(script)
+        let mut roots = Vec::new();
+        if let Some(project_root) = std::env::var_os("VWA_PROJECT_ROOT") {
+            roots.push(PathBuf::from(project_root));
+        }
+        if let Some(funclip_root) = self.root.as_deref() {
+            roots.extend(funclip_root.ancestors().map(Path::to_path_buf));
+        }
+        if let Ok(executable) = std::env::current_exe() {
+            roots.extend(executable.ancestors().map(Path::to_path_buf));
+        }
+        roots
+            .into_iter()
+            .map(|root| root.join("scripts").join("funclip_transcribe.py"))
+            .find(|script| script.is_file())
     }
 
     fn run_funclip(&self, mut command: Command) -> Result<()> {
@@ -795,6 +798,24 @@ printf '[[0, 1000], [1000, 2000]]' > "$output_dir/timestamp"
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn custom_funclip_root_keeps_the_project_streaming_helper() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let extractor = FunClipExtractor {
+            root: Some(temp.path().join("custom-model-tree")),
+            timeout: Duration::from_secs(1),
+            python: PathBuf::from("/bin/sh"),
+            cancellation: Arc::new(AtomicBool::new(false)),
+        };
+
+        let helper = extractor
+            .audio_transcriber()
+            .expect("project-owned streaming helper");
+        assert!(helper.ends_with("scripts/funclip_transcribe.py"));
+        assert!(helper.is_file());
+    }
+
     #[test]
     fn funclip_explicit_python_does_not_depend_on_process_environment() {
         let python = PathBuf::from("/opt/video-work-api/.venv/bin/python");
@@ -812,7 +833,9 @@ printf '[[0, 1000], [1000, 2000]]' > "$output_dir/timestamp"
     fn sensevoice_extract_accepts_an_srt_without_token_timestamps() {
         let temp = tempfile::tempdir().expect("temp dir");
         let funclip_dir = temp.path().join("funclip");
+        let streaming_dir = temp.path().join("scripts");
         fs::create_dir(&funclip_dir).expect("funclip dir");
+        fs::create_dir(&streaming_dir).expect("streaming helper dir");
         let helper = funclip_dir.join("videoclipper.py");
         fs::write(
             &helper,
@@ -835,6 +858,27 @@ printf '[]' > "$output_dir/timestamp"
 "#,
         )
         .expect("write helper");
+        fs::write(
+            streaming_dir.join("funclip_transcribe.py"),
+            r#"output_dir=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--output_dir' ]; then
+    output_dir=$2
+    shift 2
+  else
+    shift
+  fi
+done
+cat > "$output_dir/total.srt" <<'EOF'
+1
+00:00:00,000 --> 00:00:01,000
+multilingual text
+EOF
+printf 'multilingual text' > "$output_dir/recog_res_raw"
+printf '[]' > "$output_dir/timestamp"
+"#,
+        )
+        .expect("write streaming helper");
         let video = temp.path().join("recording.wav");
         fs::write(&video, []).expect("write recording");
         let extractor = FunClipExtractor {
