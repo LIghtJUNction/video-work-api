@@ -303,6 +303,84 @@ def _sentence_tokens(sentence: dict) -> list[str]:
     return []
 
 
+def _sentence_suffix_text(text, overlap_count: int):
+    """Return candidate text after ``overlap_count`` lexical tokens.
+
+    String sentence text carries punctuation and spacing which are not part of
+    the FunClip token list.  Start a suffix at the end of the last overlapped
+    token so that punctuation between the overlap and the new text remains in
+    the published sentence.
+    """
+
+    if isinstance(text, list):
+        return [str(token) for token in text[overlap_count:]]
+    if not isinstance(text, str):
+        return ""
+    spans = _tokenize_with_spans(text)
+    if overlap_count <= 0:
+        return text
+    if overlap_count > len(spans):
+        return ""
+    return text[spans[overlap_count - 1][2] :]
+
+
+def _append_sentence_text(previous_text, candidate_text, overlap_count: int):
+    """Append a reconciled candidate suffix without changing text format."""
+
+    if isinstance(previous_text, list):
+        suffix = _sentence_suffix_text(candidate_text, overlap_count)
+        if isinstance(suffix, list):
+            return [str(token) for token in previous_text] + suffix
+        return [str(token) for token in previous_text] + _tokenize(suffix)
+    if not isinstance(previous_text, str):
+        return previous_text
+
+    suffix = _sentence_suffix_text(candidate_text, overlap_count)
+    if isinstance(suffix, list):
+        suffix = _tokens_to_text(suffix)
+    if not suffix:
+        return previous_text
+
+    base = previous_text.rstrip()
+    suffix = suffix.lstrip() if suffix[0].isspace() else suffix
+    if not suffix:
+        return previous_text
+    if suffix[0] in ",.!?;:，。！？；：、…)]}»”'’" and base.endswith(suffix[0]):
+        suffix = suffix[1:].lstrip()
+        if not suffix:
+            return previous_text
+    if suffix[0] in ",.!?;:，。！？；：、…)]}»”'’" or suffix[0].isspace():
+        return base + suffix
+    if base and _is_han(base[-1]) and _is_han(suffix[0]):
+        return base + suffix
+    return f"{base} {suffix}"
+
+
+def _tokens_to_text(tokens: list[str]) -> str:
+    """Render lexical tokens using FunClip's Han/word spacing convention."""
+
+    rendered = ""
+    for token in tokens:
+        if not token:
+            continue
+        if rendered and not (_is_han(rendered[-1]) and _is_han(token[0])):
+            rendered += " "
+        rendered += token
+    return rendered
+
+
+def _longest_sentence_token_overlap(
+    previous_tokens: list[str], candidate_tokens: list[str]
+) -> int:
+    """Find the largest previous-suffix/candidate-prefix token overlap."""
+
+    maximum = min(len(previous_tokens), len(candidate_tokens))
+    for count in range(maximum, 0, -1):
+        if previous_tokens[-count:] == candidate_tokens[:count]:
+            return count
+    return 0
+
+
 def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
     """Keep the complete sentence emitted by an overlapping context window.
 
@@ -329,26 +407,37 @@ def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
     ):
         return candidate
 
+    overlap_count = _longest_sentence_token_overlap(previous_tokens, candidate_tokens)
     merged_tokens = list(previous_tokens)
     merged_timestamps = previous_timestamps
     merged_end = previous_end
-    for token, timestamp in zip(candidate_tokens, candidate_timestamps):
+    previous_overlap_start = len(previous_tokens) - overlap_count
+    for index, (token, timestamp) in enumerate(zip(candidate_tokens, candidate_timestamps)):
         start, end = float(timestamp[0]), float(timestamp[1])
-        if end <= merged_end:
+        if index < overlap_count:
+            previous_index = previous_overlap_start + index
+            previous_token_start, previous_token_end = merged_timestamps[previous_index]
+            if start > previous_token_start or end > previous_token_end:
+                preceding_end = (
+                    merged_timestamps[previous_index - 1][1]
+                    if previous_index
+                    else previous_token_start
+                )
+                merged_timestamps[previous_index] = [
+                    max(start, preceding_end),
+                    max(end, max(start, preceding_end)),
+                ]
+            merged_end = max(merged_end, merged_timestamps[previous_index][1])
             continue
-        if (
-            merged_tokens
-            and token == merged_tokens[-1]
-            and start < merged_end
-        ):
-            merged_timestamps[-1][1] = max(merged_timestamps[-1][1], end)
-            merged_end = merged_timestamps[-1][1]
+        if end <= merged_end:
             continue
         merged_tokens.append(token)
         merged_timestamps.append([max(start, merged_end), end])
         merged_end = end
     merged = dict(previous)
-    merged["text"] = merged_tokens
+    merged["text"] = _append_sentence_text(
+        previous.get("text"), candidate.get("text"), overlap_count
+    )
     merged["timestamp"] = merged_timestamps
     return merged
 
