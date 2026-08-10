@@ -135,6 +135,42 @@ class SentenceValidationTests(unittest.TestCase):
             len(MODULE._sentence_tokens(merged)), len(merged["timestamp"])
         )
 
+    def test_aligns_sentence_text_to_the_raw_word_timeline(self):
+        sentences = [
+            {"text": "prior duplicate", "timestamp": [[0, 200]]},
+            {"text": "next", "timestamp": [[300, 400]]},
+        ]
+
+        aligned = MODULE._align_sentences_to_words(
+            sentences,
+            "prior next",
+            [[0, 100], [320, 400]],
+        )
+
+        self.assertEqual(
+            [MODULE._sentence_tokens(item) for item in aligned],
+            [["prior"], ["next"]],
+        )
+        self.assertEqual(
+            [item["timestamp"] for item in aligned],
+            [[[0.0, 100.0]], [[320.0, 400.0]]],
+        )
+
+    def test_creates_a_segment_for_a_word_gap_between_sentences(self):
+        aligned = MODULE._align_sentences_to_words(
+            [
+                {"text": "first", "timestamp": [[0, 100]]},
+                {"text": "last", "timestamp": [[300, 400]]},
+            ],
+            "first middle last",
+            [[0, 100], [150, 200], [300, 400]],
+        )
+
+        self.assertEqual(
+            [MODULE._sentence_tokens(item) for item in aligned],
+            [["first"], ["middle"], ["last"]],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

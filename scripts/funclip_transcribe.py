@@ -583,6 +583,101 @@ def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
     return merged
 
 
+def _contiguous_index_runs(indices: list[int]) -> list[tuple[int, int]]:
+    """Return inclusive contiguous runs from an already ordered index list."""
+
+    if not indices:
+        return []
+    runs: list[tuple[int, int]] = []
+    start = previous = indices[0]
+    for index in indices[1:]:
+        if index != previous + 1:
+            runs.append((start, previous))
+            start = index
+        previous = index
+    runs.append((start, previous))
+    return runs
+
+
+def _align_sentences_to_words(
+    sentences: list[dict], raw_text: str, timestamps: list[list[float]]
+) -> list[dict]:
+    """Make SRT sentence text a lossless view of the published word timeline.
+
+    FunASR can segment the same overlapping chunk differently from its raw
+    token stream.  Keeping those two lists independent can duplicate one word
+    in SRT while omitting another.  Assign every published word to the
+    sentence interval it overlaps (or to a synthetic gap segment), then retain
+    original punctuation only when its lexical tokens still match exactly.
+    """
+
+    if not timestamps:
+        return sentences
+    raw_tokens = _tokenize(raw_text)
+    if len(raw_tokens) != len(timestamps):
+        raise RuntimeError(
+            "FunClip token/timestamp cardinality mismatch while aligning SRT: "
+            f"{len(raw_tokens)} tokens, {len(timestamps)} timestamps"
+        )
+
+    intervals: list[tuple[float, float, int]] = []
+    for index, sentence in enumerate(sentences):
+        start, end = _sentence_bounds(sentence)
+        if end > start:
+            intervals.append((start, end, index))
+
+    assignments: list[list[int]] = [[] for _ in sentences]
+    unassigned: list[int] = []
+    for word_index, timestamp in enumerate(timestamps):
+        start, end = float(timestamp[0]), float(timestamp[1])
+        candidates: list[tuple[float, float, int]] = []
+        for sentence_start, sentence_end, sentence_index in intervals:
+            overlap = min(end, sentence_end) - max(start, sentence_start)
+            if overlap > 0:
+                candidates.append((overlap, sentence_start, sentence_index))
+        if not candidates:
+            unassigned.append(word_index)
+            continue
+        _overlap, _sentence_start, sentence_index = max(
+            candidates, key=lambda item: (item[0], -item[1], -item[2])
+        )
+        assignments[sentence_index].append(word_index)
+
+    events: list[tuple[int, dict]] = []
+
+    def append_event(
+        first_index: int,
+        last_index: int,
+        source_sentence: dict | None,
+    ) -> None:
+        indices = list(range(first_index, last_index + 1))
+        tokens = raw_tokens[first_index : last_index + 1]
+        item = dict(source_sentence) if source_sentence is not None else {}
+        if source_sentence is not None and _sentence_tokens(source_sentence) == tokens:
+            item["text"] = source_sentence.get("text")
+        else:
+            item["text"] = _tokens_to_text(tokens)
+        item["timestamp"] = [list(timestamps[index]) for index in indices]
+        events.append((first_index, item))
+
+    for sentence_index, assigned in enumerate(assignments):
+        if not assigned:
+            continue
+        for first_index, last_index in _contiguous_index_runs(assigned):
+            source = (
+                sentences[sentence_index]
+                if first_index == assigned[0] and last_index == assigned[-1]
+                else None
+            )
+            append_event(first_index, last_index, source)
+
+    for first_index, last_index in _contiguous_index_runs(unassigned):
+        append_event(first_index, last_index, None)
+
+    events.sort(key=lambda event: event[0])
+    return [sentence for _first_index, sentence in events]
+
+
 def _validate_timeline(sentences: list[dict], timestamps: list[list[float]], duration: float) -> None:
     """Reject output that cannot be trusted as a chronological recording."""
 
@@ -771,6 +866,12 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
 
     if not all_sentences:
         raise RuntimeError("FunClip produced no timestamped segments")
+    if model_name == "paraformer":
+        all_sentences = _align_sentences_to_words(
+            all_sentences, "".join(all_raw_text), all_timestamps
+        )
+        if not all_sentences:
+            raise RuntimeError("FunClip produced no word-aligned SRT segments")
     _validate_timeline(
         all_sentences,
         all_timestamps if model_name == "paraformer" else [],
