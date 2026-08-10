@@ -211,6 +211,23 @@ class SentenceValidationTests(unittest.TestCase):
         self.assertEqual(merged["text"], "trusted prefix and more")
         self.assertEqual(merged["timestamp"], [[0, 100], [100.0, 200.0]])
 
+    def test_combines_all_trailing_sentences_before_reconciling(self):
+        combined = MODULE._combine_non_overlapping_sentences(
+            [
+                {"text": "hello", "timestamp": [[0, 100]]},
+                {"text": "world", "timestamp": [[100, 200]]},
+            ]
+        )
+        candidate = {
+            "text": "hello world continued",
+            "timestamp": [[90, 300]],
+        }
+
+        merged = MODULE._reconcile_overlapping_sentence(combined, candidate)
+
+        self.assertEqual(merged["text"], "hello world continued")
+        self.assertEqual(merged["timestamp"], [[0, 100], [100, 200], [200.0, 300.0]])
+
     def test_aligns_sentence_text_to_the_raw_word_timeline(self):
         sentences = [
             {"text": "prior duplicate", "timestamp": [[0, 200]]},
