@@ -32,6 +32,22 @@ class OverlappingSentenceTests(unittest.TestCase):
             len(MODULE._sentence_tokens(merged)), len(merged["timestamp"])
         )
 
+    def test_deduplicates_case_variant_overlap_while_preserving_spelling(self):
+        previous = {
+            "text": "Hello world",
+            "timestamp": [[0, 100], [100, 200]],
+        }
+        candidate = {
+            "text": "hello world continued",
+            "timestamp": [[180, 250], [250, 300], [300, 400]],
+        }
+
+        merged = MODULE._reconcile_overlapping_sentence(previous, candidate)
+
+        self.assertEqual(merged["text"], "Hello world continued")
+        self.assertEqual(len(MODULE._sentence_tokens(merged)), 3)
+        self.assertEqual(len(merged["timestamp"]), 3)
+
     def test_preserves_prefix_for_a_small_positive_sentence_shift(self):
         previous = {
             "text": "short prefix",

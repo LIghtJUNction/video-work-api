@@ -564,9 +564,11 @@ def _longest_sentence_token_overlap(
 ) -> int:
     """Find the largest previous-suffix/candidate-prefix token overlap."""
 
-    maximum = min(len(previous_tokens), len(candidate_tokens))
+    previous_keys = [token.casefold() for token in previous_tokens]
+    candidate_keys = [token.casefold() for token in candidate_tokens]
+    maximum = min(len(previous_keys), len(candidate_keys))
     for count in range(maximum, 0, -1):
-        if previous_tokens[-count:] == candidate_tokens[:count]:
+        if previous_keys[-count:] == candidate_keys[:count]:
             return count
     return 0
 
