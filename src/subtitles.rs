@@ -411,6 +411,10 @@ impl SubtitleExtractor for FunClipExtractor {
         if !streaming_audio {
             command.arg("--stage").arg("1");
         }
+        // The helper must import the same configured FunClip tree as the
+        // service.  This matters for installations whose model/vendor root is
+        // outside the repository checkout.
+        command.env("VWA_FUNCLIP_ROOT", root);
         command.current_dir(root);
         self.run_funclip(command)?;
         self.read_outputs(output_dir, model)
@@ -749,6 +753,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 touch "$audio.called"
+printf '%s' "${VWA_FUNCLIP_ROOT-}" > "$audio.funclip-root"
 cat > "$output_dir/total.srt" <<'EOF'
 1
 00:00:00,000 --> 00:00:01,000
@@ -762,7 +767,7 @@ printf '[[0, 1000], [1000, 2000]]' > "$output_dir/timestamp"
         let audio = temp.path().join("recording.wav");
         fs::write(&audio, []).expect("write recording");
         let extractor = FunClipExtractor {
-            root: Some(funclip_root),
+            root: Some(funclip_root.clone()),
             timeout: Duration::from_secs(1),
             python: PathBuf::from("/bin/sh"),
             cancellation: Arc::new(AtomicBool::new(false)),
@@ -784,6 +789,10 @@ printf '[[0, 1000], [1000, 2000]]' > "$output_dir/timestamp"
             vec![("chunked", 0.0, 1.0), ("audio", 1.0, 2.0)]
         );
         assert!(audio.with_extension("wav.called").is_file());
+        assert_eq!(
+            fs::read_to_string(audio.with_extension("wav.funclip-root")).unwrap(),
+            funclip_root.to_string_lossy()
+        );
     }
 
     #[test]
