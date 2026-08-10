@@ -64,6 +64,22 @@ class OverlappingSentenceTests(unittest.TestCase):
         self.assertEqual(len(MODULE._sentence_tokens(merged)), 3)
         self.assertEqual(len(merged["timestamp"]), 3)
 
+    def test_preserves_start_when_full_prefix_shifts_backward(self):
+        previous = {
+            "text": "alpha beta",
+            "timestamp": [[100, 200], [200, 300]],
+        }
+        candidate = {
+            "text": "alpha beta gamma",
+            "timestamp": [[90, 210], [210, 320], [320, 400]],
+        }
+
+        merged = MODULE._reconcile_overlapping_sentence(previous, candidate)
+
+        self.assertEqual(merged["text"], "alpha beta gamma")
+        self.assertEqual(merged["timestamp"][0][0], 100)
+        self.assertEqual(len(MODULE._sentence_tokens(merged)), len(merged["timestamp"]))
+
     def test_chunk_dedup_keeps_a_distinct_word_that_overlaps_previous_end(self):
         text, timestamps = MODULE._deduplicate_chunk_tokens(
             "prior", "next word", [[150, 250], [250, 350]], 200
@@ -79,6 +95,31 @@ class OverlappingSentenceTests(unittest.TestCase):
 
         self.assertEqual(text, "gamma")
         self.assertEqual(timestamps, [[250, 350]])
+
+    def test_chunk_dedup_keeps_a_repeated_word_after_the_overlap(self):
+        text, timestamps = MODULE._deduplicate_chunk_tokens(
+            "prior", "prior next", [[250, 300], [300, 350]], 200
+        )
+
+        self.assertEqual(text, "prior next")
+        self.assertEqual(timestamps, [[250.0, 300.0], [300.0, 350.0]])
+
+    def test_chunk_dedup_shifts_a_distinct_word_entirely_before_boundary(self):
+        text, timestamps = MODULE._deduplicate_chunk_tokens(
+            "prior", "next", [[150, 180]], 200
+        )
+
+        self.assertEqual(text, "next")
+        self.assertEqual(timestamps, [[200.0, 230.0]])
+
+    def test_mixed_script_chunk_join_keeps_tokens_separate(self):
+        parts = []
+        MODULE._append_transcript_part(parts, "abc中")
+        MODULE._append_transcript_part(parts, "中")
+
+        joined = "".join(parts)
+        self.assertEqual(joined, "abc中 中")
+        self.assertEqual(MODULE._tokenize(joined), ["abc中", "中"])
 
     def test_sentence_merge_drops_a_skipped_candidate_token(self):
         previous = {
@@ -116,6 +157,10 @@ class SentenceValidationTests(unittest.TestCase):
             MODULE._validate_timestamp_entries(
                 [[0, 100], ["bad", 200], [200, 300]]
             )
+
+    def test_rejects_out_of_order_top_level_timestamps(self):
+        with self.assertRaisesRegex(RuntimeError, "out-of-order"):
+            MODULE._validate_timestamp_entries([[0, 100], [90, 200]])
 
     def test_preserves_string_punctuation_when_extending_sentence(self):
         previous = {

@@ -171,11 +171,14 @@ def _validate_sentence_entries(sentences, context: str = "FunASR") -> None:
             raise RuntimeError(
                 f"{context} returned a sentence without valid timestamps at index {index}"
             )
-        shifted = _shift_timestamps(raw_timestamps, 0)
-        if len(shifted) != len(raw_timestamps):
+        try:
+            _validate_timestamp_entries(
+                raw_timestamps, f"{context} sentence {index}"
+            )
+        except RuntimeError as exc:
             raise RuntimeError(
                 f"{context} returned malformed timestamps at sentence index {index}"
-            )
+            ) from exc
 
 
 def _validate_timestamp_entries(timestamps, context: str = "FunASR") -> None:
@@ -185,6 +188,7 @@ def _validate_timestamp_entries(timestamps, context: str = "FunASR") -> None:
         return
     if not isinstance(timestamps, (list, tuple)):
         raise RuntimeError(f"{context} returned non-list timestamps")
+    previous_end = 0.0
     for index, item in enumerate(timestamps):
         if not isinstance(item, (list, tuple)) or len(item) != 2:
             raise RuntimeError(f"{context} returned malformed timestamp at index {index}")
@@ -197,6 +201,11 @@ def _validate_timestamp_entries(timestamps, context: str = "FunASR") -> None:
             ) from exc
         if not np.isfinite(start) or not np.isfinite(end) or end <= start:
             raise RuntimeError(f"{context} returned malformed timestamp at index {index}")
+        if start < previous_end:
+            raise RuntimeError(
+                f"{context} returned out-of-order timestamp at index {index}"
+            )
+        previous_end = end
 
 
 def _shift_sentences(sentences, offset_ms: int) -> list[dict]:
@@ -317,6 +326,7 @@ def _deduplicate_chunk_tokens(
     candidate_text: str,
     timestamps: list[list[float]],
     previous_end_ms: float,
+    previous_tokens: list[str] | None = None,
 ) -> tuple[str, list[list[float]]]:
     """Remove only lexical overlap and clip genuine next words at the boundary."""
 
@@ -326,9 +336,20 @@ def _deduplicate_chunk_tokens(
             "FunClip token/timestamp cardinality mismatch while deduplicating chunks: "
             f"{len(candidate_spans)} tokens, {len(timestamps)} timestamps"
         )
-    previous_tokens = _tokenize(previous_text)
+    if previous_tokens is None:
+        previous_tokens = _tokenize(previous_text)
     candidate_tokens = [token for token, _start, _end in candidate_spans]
-    overlap_count = _longest_sentence_token_overlap(previous_tokens, candidate_tokens)
+    lexical_overlap = _longest_sentence_token_overlap(previous_tokens, candidate_tokens)
+    temporal_overlap = 0
+    for timestamp in timestamps:
+        start_ms = float(timestamp[0])
+        if start_ms >= previous_end_ms:
+            break
+        temporal_overlap += 1
+    # Matching words after the previous logical end are a distinct repetition,
+    # not acoustic overlap.  Restrict lexical de-duplication to the candidate
+    # prefix that actually overlaps the prior word timeline.
+    overlap_count = min(lexical_overlap, temporal_overlap)
     selected_indices: list[int] = []
     selected_timestamps: list[list[float]] = []
     cursor_ms = previous_end_ms
@@ -336,10 +357,20 @@ def _deduplicate_chunk_tokens(
         start_ms, end_ms = timestamps[index]
         start_ms = float(start_ms)
         end_ms = float(end_ms)
-        if end_ms <= cursor_ms:
-            continue
+        token_duration_ms = max(end_ms - start_ms, 1.0)
+        if start_ms < cursor_ms:
+            # A distinct word can straddle—or, under small model jitter, fall
+            # entirely before—the previous word's end.  Shift its interval
+            # forward instead of dropping the recognized token.
+            start_ms = cursor_ms
+            if end_ms <= cursor_ms:
+                end_ms = cursor_ms + token_duration_ms
+        else:
+            start_ms = max(start_ms, cursor_ms)
+        if end_ms <= start_ms:
+            end_ms = start_ms + token_duration_ms
         selected_indices.append(index)
-        selected_timestamps.append([max(start_ms, cursor_ms), end_ms])
+        selected_timestamps.append([start_ms, end_ms])
         cursor_ms = end_ms
     if not selected_indices:
         return "", []
@@ -360,7 +391,16 @@ def _append_transcript_part(parts: list[str], text: str) -> None:
         parts.append(text)
         return
     previous = parts[-1]
-    if previous and _is_han(previous[-1]) and _is_han(text[0]):
+    previous_tokens = _tokenize(previous)
+    next_tokens = _tokenize(text)
+    if (
+        previous_tokens
+        and next_tokens
+        and len(previous_tokens[-1]) == 1
+        and len(next_tokens[0]) == 1
+        and _is_han(previous_tokens[-1])
+        and _is_han(next_tokens[0])
+    ):
         parts.append(text)
     else:
         parts.append(" " + text)
@@ -535,7 +575,7 @@ def _reconcile_overlapping_sentence(previous: dict, candidate: dict) -> dict:
         len(candidate_tokens) >= len(previous_tokens)
         and candidate_tokens[: len(previous_tokens)] == previous_tokens
     )
-    if candidate_has_previous_prefix:
+    if candidate_has_previous_prefix and _candidate_start >= _previous_start:
         return candidate
 
     previous_timestamps = [list(item) for item in previous["timestamp"]]
@@ -806,6 +846,7 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
 
     all_sentences: list[dict] = []
     all_raw_text: list[str] = []
+    all_raw_tokens: list[str] = []
     all_timestamps: list[list[float]] = []
     previous_sentence_end_ms = 0.0
     previous_word_end_ms = 0.0
@@ -857,9 +898,17 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
                     selected_text,
                     selected_timestamps,
                     previous_word_end_ms,
+                    previous_tokens=all_raw_tokens,
                 )
                 if selected_timestamps:
+                    selected_tokens = _tokenize(selected_text)
+                    if len(selected_tokens) != len(selected_timestamps):
+                        raise RuntimeError(
+                            "FunClip token/timestamp cardinality mismatch after chunk de-duplication: "
+                            f"{len(selected_tokens)} tokens, {len(selected_timestamps)} timestamps"
+                        )
                     _append_transcript_part(all_raw_text, selected_text)
+                    all_raw_tokens.extend(selected_tokens)
                     all_timestamps.extend(selected_timestamps)
                     previous_word_end_ms = selected_timestamps[-1][1]
         chunk_start += chunk_duration
