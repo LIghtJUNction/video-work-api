@@ -121,6 +121,12 @@ class OverlappingSentenceTests(unittest.TestCase):
         self.assertEqual(joined, "abc中 中")
         self.assertEqual(MODULE._tokenize(joined), ["abc中", "中"])
 
+    def test_token_renderer_separates_mixed_script_tokens(self):
+        rendered = MODULE._tokens_to_text(["oppo", "还", "要"])
+
+        self.assertEqual(rendered, "oppo 还要")
+        self.assertEqual(MODULE._tokenize(rendered), ["oppo", "还", "要"])
+
     def test_sentence_merge_drops_a_skipped_candidate_token(self):
         previous = {
             "text": "prior",
@@ -200,6 +206,18 @@ class SentenceValidationTests(unittest.TestCase):
             [item["timestamp"] for item in aligned],
             [[[0.0, 100.0]], [[320.0, 400.0]]],
         )
+
+    def test_aligns_mixed_script_list_text_without_merging_words(self):
+        aligned = MODULE._align_sentences_to_words(
+            [
+                {"text": ["oppo", "还"], "timestamp": [[0, 100], [100, 200]]},
+            ],
+            "oppo 还",
+            [[0, 100], [100, 200]],
+        )
+
+        self.assertEqual(aligned[0]["text"], "oppo 还")
+        self.assertEqual(MODULE._tokenize(aligned[0]["text"]), ["oppo", "还"])
 
     def test_creates_a_segment_for_a_word_gap_between_sentences(self):
         aligned = MODULE._align_sentences_to_words(
