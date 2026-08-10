@@ -894,7 +894,7 @@ def transcribe(path: Path, output_dir: Path, model_name: str) -> None:
                     logical_end_ms,
                 )
                 selected_text, selected_timestamps = _deduplicate_chunk_tokens(
-                    "".join(all_raw_text),
+                    "",
                     selected_text,
                     selected_timestamps,
                     previous_word_end_ms,
