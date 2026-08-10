@@ -16,7 +16,6 @@ import json
 import os
 import subprocess
 import sys
-import unicodedata
 from pathlib import Path
 
 import numpy as np
@@ -33,22 +32,28 @@ CHUNK_OVERLAP_SECONDS = 1.0
 # pathological long chunk without allowing an unbounded number of retries.
 MIN_RETRY_SECONDS = 5.0
 HAN_RANGES = (
+    (0x2E80, 0x2E99),
+    (0x2E9B, 0x2EF3),
+    (0x2F00, 0x2FD5),
+    (0x3005, 0x3005),
+    (0x3007, 0x3007),
+    (0x3021, 0x3029),
+    (0x3038, 0x303B),
     (0x3400, 0x4DBF),
     (0x4E00, 0x9FFF),
-    (0xF900, 0xFAFF),
+    (0xF900, 0xFA6D),
+    (0xFA70, 0xFAD9),
+    (0x16FE2, 0x16FE3),
+    (0x16FF0, 0x16FF1),
     (0x20000, 0x2A6DF),
-    (0x2A700, 0x2B73F),
-    (0x2B740, 0x2B81F),
-    (0x2B820, 0x2CEAF),
-    (0x2CEB0, 0x2EBEF),
-    (0x2EBF0, 0x2EE5F),
-    (0x2F800, 0x2FA1F),
-    (0x30000, 0x3134F),
+    (0x2A700, 0x2B739),
+    (0x2B740, 0x2B81D),
+    (0x2B820, 0x2CEA1),
+    (0x2CEB0, 0x2EBE0),
+    (0x2EBF0, 0x2EE5D),
+    (0x2F800, 0x2FA1D),
+    (0x30000, 0x3134A),
     (0x31350, 0x323AF),
-)
-HAN_NAME_PREFIXES = (
-    "CJK UNIFIED IDEOGRAPH-",
-    "CJK COMPATIBILITY IDEOGRAPH-",
 )
 WORD_JOINERS = frozenset(("_", "-"))
 APOSTROPHES = frozenset(("'", "’"))
@@ -173,12 +178,9 @@ def _token_count(text: str) -> int:
 
 def _is_han(character: str) -> bool:
     codepoint = ord(character)
-    if not any(start <= codepoint <= end for start, end in HAN_RANGES):
-        return False
-    # The Rust regex property excludes unassigned code points inside the
-    # Unicode blocks.  Names provide the same assigned-ideograph check in
-    # Python while still covering every current Han extension range.
-    return unicodedata.name(character, "").startswith(HAN_NAME_PREFIXES)
+    # Keep this list byte-for-byte aligned with the Unicode Han property used
+    # by Rust's regex crate, including script characters such as U+3007.
+    return any(start <= codepoint <= end for start, end in HAN_RANGES)
 
 
 def _is_word_character(character: str) -> bool:
@@ -439,20 +441,26 @@ def _recognize_chunk(clipper, samples: np.ndarray, start: float, duration: float
                 f"{_token_count(str(raw_text))} tokens, {len(timestamps)} timestamps"
             )
         midpoint = samples.size // 2
-        left_samples = samples[:midpoint]
-        right_samples = samples[midpoint:]
+        overlap_samples = min(
+            midpoint, int(round(SAMPLE_RATE * CHUNK_OVERLAP_SECONDS))
+        )
+        right_start_index = midpoint - overlap_samples
+        left_end_index = min(samples.size, midpoint + overlap_samples)
+        left_samples = samples[:left_end_index]
+        right_samples = samples[right_start_index:]
         left_duration = left_samples.size / SAMPLE_RATE
-        right_start = start + left_duration
+        right_start = start + right_start_index / SAMPLE_RATE
+        right_duration = right_samples.size / SAMPLE_RATE
         print(
             f"FunClip token/timestamp mismatch in {start:.3f}-{start + duration:.3f}s; "
             f"retrying {start:.3f}-{right_start:.3f}s and {right_start:.3f}-"
-            f"{right_start + right_samples.size / SAMPLE_RATE:.3f}s",
+            f"{right_start + right_duration:.3f}s with overlap",
             file=sys.stderr,
         )
         return _recognize_chunk(
             clipper, left_samples, start, left_duration, model_name
         ) + _recognize_chunk(
-            clipper, right_samples, right_start, right_samples.size / SAMPLE_RATE, model_name
+            clipper, right_samples, right_start, right_duration, model_name
         )
     return [(start, duration, state)]
 
