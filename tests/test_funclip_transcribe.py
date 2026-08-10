@@ -32,6 +32,35 @@ class OverlappingSentenceTests(unittest.TestCase):
             len(MODULE._sentence_tokens(merged)), len(merged["timestamp"])
         )
 
+    def test_preserves_prefix_for_a_small_positive_sentence_shift(self):
+        previous = {
+            "text": "short prefix",
+            "timestamp": [[0, 100], [100, 200]],
+        }
+        candidate = {
+            "text": "prefix suffix",
+            "timestamp": [[150, 250], [250, 350]],
+        }
+
+        merged = MODULE._reconcile_overlapping_sentence(previous, candidate)
+
+        self.assertEqual(merged["text"], "short prefix suffix")
+        self.assertEqual(len(MODULE._sentence_tokens(merged)), 3)
+        self.assertEqual(len(merged["timestamp"]), 3)
+
+
+class SentenceValidationTests(unittest.TestCase):
+    def test_rejects_malformed_nested_sentence_timestamps(self):
+        with self.assertRaisesRegex(RuntimeError, "malformed timestamps"):
+            MODULE._shift_sentences(
+                [{"text": "valid", "timestamp": [[0, 100], ["bad", 200]]}],
+                0,
+            )
+
+    def test_rejects_non_object_nested_sentences(self):
+        with self.assertRaisesRegex(RuntimeError, "non-object sentence"):
+            MODULE._shift_sentences(["not a sentence"], 0)
+
     def test_preserves_string_punctuation_when_extending_sentence(self):
         previous = {
             "text": "Hello, world!",
