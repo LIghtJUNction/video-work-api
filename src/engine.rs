@@ -122,10 +122,13 @@ impl SpeechEngine for CosyVoiceEngine {
     }
 }
 
+/// Arguments recorded by [`FakeEngine`] for one generated speech request.
+pub type FakeEngineCall = (String, f64, GenerationMode, String, PathBuf);
+
 /// Test / dry-run engine that writes silence.
 pub struct FakeEngine {
     pub loaded_flag: AtomicBool,
-    pub calls: Mutex<Vec<(String, f64, GenerationMode, String, PathBuf)>>,
+    pub calls: Mutex<Vec<FakeEngineCall>>,
     delay: Option<Duration>,
 }
 
@@ -162,13 +165,16 @@ impl SpeechEngine for FakeEngine {
         if let Some(d) = self.delay {
             std::thread::sleep(d);
         }
-        self.calls.lock().unwrap().push((
-            target_text.to_string(),
-            speed,
-            generation_mode,
-            prompt_text.to_string(),
-            prompt_wav.to_path_buf(),
-        ));
+        self.calls
+            .lock()
+            .map_err(|_| anyhow::anyhow!("fake engine call log lock poisoned"))?
+            .push((
+                target_text.to_string(),
+                speed,
+                generation_mode,
+                prompt_text.to_string(),
+                prompt_wav.to_path_buf(),
+            ));
         crate::audio::write_silent_wav(output_path, 0.1, 24_000)?;
         self.loaded_flag.store(true, Ordering::Relaxed);
         Ok(())
