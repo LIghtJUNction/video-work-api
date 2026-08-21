@@ -79,6 +79,9 @@ check() {
   cd "$srcdir/$_pkgsrc"
   export CARGO_HOME="${CARGO_HOME:-$srcdir/cargo-home}"
   export CARGO_TARGET_DIR="$srcdir/cargo-target"
+  # Test binaries live outside the source checkout in this package build. Keep
+  # project-owned helper discovery anchored to the checked-out application.
+  export VWA_PROJECT_ROOT="$srcdir/$_pkgsrc"
 
   bash -n scripts/vwactl
   cargo test --release --offline 2>/dev/null \
