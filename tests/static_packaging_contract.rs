@@ -8,6 +8,7 @@ fn vcs_pkgver_keeps_the_semantic_prefix_without_a_tag() {
 }
 
 #[test]
-fn package_checks_anchor_project_helper_discovery_to_the_checkout() {
-    assert!(PKGBUILD.contains("export VWA_PROJECT_ROOT=\"$srcdir/$_pkgsrc\""));
+fn package_checks_keep_test_binaries_outside_the_source_checkout() {
+    assert!(PKGBUILD.contains("export CARGO_TARGET_DIR=\"$srcdir/cargo-target\""));
+    assert!(!PKGBUILD.contains("export VWA_PROJECT_ROOT="));
 }

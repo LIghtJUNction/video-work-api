@@ -1,6 +1,7 @@
 const RUNTIME_REQUIREMENTS: &str = include_str!("../scripts/requirements-runtime.txt");
 const MAIN: &str = include_str!("../src/main.rs");
 const SERVICE_UNIT: &str = include_str!("../systemd/video-work-api.service");
+const SUBTITLES: &str = include_str!("../src/subtitles.rs");
 
 #[test]
 fn runtime_dependency_pins_and_setup_bootstrap_stay_remediated() {
@@ -20,6 +21,11 @@ fn runtime_dependency_pins_and_setup_bootstrap_stay_remediated() {
     assert!(!RUNTIME_REQUIREMENTS.contains("transformers==5.5.0"));
     assert!(MAIN.contains("\"setuptools==83.0.0\""));
     assert!(!MAIN.contains("\"setuptools==80.10.2\""));
+}
+
+#[test]
+fn package_test_helper_discovery_uses_the_compile_time_checkout_as_a_fallback() {
+    assert!(SUBTITLES.contains("#[cfg(test)]\n        roots.push(PathBuf::from(env!(\"CARGO_MANIFEST_DIR\")));"));
 }
 
 #[test]

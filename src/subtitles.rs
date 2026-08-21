@@ -270,6 +270,12 @@ impl FunClipExtractor {
         if let Some(funclip_root) = self.root.as_deref() {
             roots.extend(funclip_root.ancestors().map(Path::to_path_buf));
         }
+        // Package tests may put CARGO_TARGET_DIR outside the checkout, so the
+        // test executable's ancestors alone cannot reach the project helper.
+        // Keep this test-only fallback after a configured FunClip root: fixture
+        // roots must still win for tests that provide their own helper.
+        #[cfg(test)]
+        roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
         if let Ok(executable) = std::env::current_exe() {
             roots.extend(executable.ancestors().map(Path::to_path_buf));
         }
