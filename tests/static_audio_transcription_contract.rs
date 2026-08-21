@@ -17,6 +17,8 @@ fn recording_transcription_batch_keeps_per_file_text_srt_and_segments_visible() 
         "audioTranscriptionProgressText",
         "audioTranscriptionProgress",
         "audioTranscriptionJobs",
+        "copyAllAudioTranscriptions",
+        "downloadAllAudioTranscriptions",
         "retryAudioTranscriptionFailures",
     ] {
         assert!(INDEX.contains(&format!("id=\"{id}\"")), "missing #{id}");
@@ -39,6 +41,9 @@ fn recording_transcription_batch_keeps_per_file_text_srt_and_segments_visible() 
     assert!(!SCRIPT.contains("audioTranscriptionResult"));
     assert!(SCRIPT.contains("transcriptionSegments"));
     assert!(SCRIPT.contains("subtitleDownloadName(job.label)"));
+    assert!(SCRIPT.contains("formatTranscriptionResults(audioTranscriptionJobs)"));
+    assert!(SCRIPT.contains("recording-transcriptions.txt"));
+    assert!(SCRIPT.contains("copyTextToClipboard(text)"));
     assert!(DOCS.contains("/api/audio/transcriptions"));
     assert!(DOCS.contains("/api/audio/transcriptions/upload"));
     assert!(DOCS.contains("每次请求一个 multipart"));

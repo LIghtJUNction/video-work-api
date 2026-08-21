@@ -6,7 +6,7 @@
   <script>try{document.documentElement.dataset.theme=localStorage.getItem("vwa-theme")||"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
   <title>Video Work API · 视频工作 API</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260726-logo">
-  <link rel="stylesheet" href="/static/styles.css?v=20260728-landing-session">
+  <link rel="stylesheet" href="/static/styles.css?v=20260821-transcription-export">
   <script src="/static/theme.js?v=20260721" defer></script>
 </head>
 <body>
@@ -128,7 +128,7 @@
         </form>
         <p class="hint" data-i18n="audioTranscriptionHint">使用现有 FunClip stage-1 FunASR Paraformer；浏览器逐个上传并转写，不会进行第二次转写。</p>
         <div id="audioTranscriptionBatch" class="batch-results hidden">
-          <div class="batch-progress"><span id="audioTranscriptionProgressText" role="status" aria-live="polite" aria-atomic="true"></span><progress id="audioTranscriptionProgress" max="1" value="0"></progress><button id="retryAudioTranscriptionFailures" type="button" class="secondary compact hidden"></button></div>
+          <div class="batch-progress"><span id="audioTranscriptionProgressText" role="status" aria-live="polite" aria-atomic="true"></span><progress id="audioTranscriptionProgress" max="1" value="0"></progress><div class="batch-actions"><button id="copyAllAudioTranscriptions" type="button" class="secondary compact hidden" data-i18n="copyAllTranscriptions">复制全部文字</button><button id="downloadAllAudioTranscriptions" type="button" class="secondary compact hidden" data-i18n="downloadAllTranscriptions">下载全部文字</button><button id="retryAudioTranscriptionFailures" type="button" class="secondary compact hidden"></button></div></div>
           <div id="audioTranscriptionJobs" class="job-list"></div>
         </div>
       </section>
@@ -193,8 +193,8 @@
       </form>
     </article>
   </template>
-  <script src="/static/batch-core.js?v=20260722e"></script>
+  <script src="/static/batch-core.js?v=20260821-transcription-export"></script>
   <script src="/static/agent-prompt.js?v=20260722-1"></script>
-  <script src="/static/app.js?v=20260728-landing-session"></script>
+  <script src="/static/app.js?v=20260821-transcription-export"></script>
 </body>
 </html>

@@ -25,6 +25,17 @@
     return itemCount > 1;
   }
 
+  function formatTranscriptionResults(jobs) {
+    return Array.from(jobs || [])
+      .filter((job) => job?.status === "complete" && job.result)
+      .map((job, index) => {
+        const label = String(job.label || `Recording ${index + 1}`);
+        const text = typeof job.result.text === "string" ? job.result.text : "";
+        return `[${index + 1}] ${label}\n${text}`;
+      })
+      .join("\n\n");
+  }
+
   function validateItems(items, options) {
     const values = Array.from(items || []);
     if (!values.length) return { type: "empty" };
@@ -81,6 +92,7 @@
     parseNonEmptyLines,
     parseWholeTextItem,
     shouldShowSingleGenerationAction,
+    formatTranscriptionResults,
     validateItems,
     runSequential,
   };

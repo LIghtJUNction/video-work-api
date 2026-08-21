@@ -20,6 +20,8 @@ fn batch_workspaces_expose_queue_structure() {
         "audioTranscriptionProgressText",
         "audioTranscriptionProgress",
         "audioTranscriptionJobs",
+        "copyAllAudioTranscriptions",
+        "downloadAllAudioTranscriptions",
         "retryAudioTranscriptionFailures",
     ] {
         assert!(INDEX.contains(&format!("id=\"{id}\"")), "missing #{id}");
@@ -46,13 +48,15 @@ fn batch_workspaces_expose_queue_structure() {
 
 #[test]
 fn batch_assets_are_loaded_in_order_with_matching_versions() {
-    let core = INDEX.find("/static/batch-core.js?v=20260722e").unwrap();
+    let core = INDEX
+        .find("/static/batch-core.js?v=20260821-transcription-export")
+        .unwrap();
     let prompt = INDEX.find("/static/agent-prompt.js?v=20260722-1").unwrap();
     let app = INDEX
-        .find("/static/app.js?v=20260728-landing-session")
+        .find("/static/app.js?v=20260821-transcription-export")
         .unwrap();
     assert!(core < prompt && prompt < app);
-    assert!(INDEX.contains("/static/styles.css?v=20260728-landing-session"));
+    assert!(INDEX.contains("/static/styles.css?v=20260821-transcription-export"));
 }
 
 #[test]
