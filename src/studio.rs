@@ -27,6 +27,13 @@ use crate::{MAX_TEXT_LENGTH, PRODUCT};
 
 const XRY_MAX_CAPTION_CHARS: usize = 12;
 
+type ExtractedSubtitleCopy = (
+    Vec<SubtitleSegment>,
+    String,
+    Vec<WordTimestamp>,
+    Option<String>,
+);
+
 pub struct Studio {
     pub settings: Settings,
     pub database: Database,
@@ -741,12 +748,7 @@ impl Studio {
         &self,
         video_path: &Path,
         expected_sha256: Option<&str>,
-    ) -> Result<(
-        Vec<SubtitleSegment>,
-        String,
-        Vec<WordTimestamp>,
-        Option<String>,
-    )> {
+    ) -> Result<ExtractedSubtitleCopy> {
         let scratch_root = self.settings.data_dir.join("subtitle-inputs");
         fs::create_dir_all(&scratch_root)?;
         let extension = video_path

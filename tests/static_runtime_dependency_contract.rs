@@ -26,7 +26,9 @@ fn runtime_dependency_pins_and_setup_bootstrap_stay_remediated() {
 #[test]
 fn package_test_helper_discovery_uses_the_compile_time_checkout_as_a_fallback() {
     assert!(SUBTITLES.contains("#[cfg(not(test))]\n        if let Some(project_root)"));
-    assert!(SUBTITLES.contains("#[cfg(test)]\n        roots.push(PathBuf::from(env!(\"CARGO_MANIFEST_DIR\")));"));
+    assert!(SUBTITLES.contains(
+        "#[cfg(test)]\n        roots.push(PathBuf::from(env!(\"CARGO_MANIFEST_DIR\")));"
+    ));
 }
 
 #[test]
