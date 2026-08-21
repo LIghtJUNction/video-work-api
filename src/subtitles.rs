@@ -264,6 +264,9 @@ impl FunClipExtractor {
     /// multi-hour recording in one array.
     fn audio_transcriber(&self) -> Option<PathBuf> {
         let mut roots = Vec::new();
+        // Unit-test fixtures supply their own roots. Do not let an operator's
+        // process environment redirect those fixtures to a real helper.
+        #[cfg(not(test))]
         if let Some(project_root) = std::env::var_os("VWA_PROJECT_ROOT") {
             roots.push(PathBuf::from(project_root));
         }
