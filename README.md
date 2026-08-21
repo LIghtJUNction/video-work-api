@@ -141,7 +141,8 @@ The English/Chinese studio provides:
   each), with progress, retry, preview, and SRT download;
 - batch recording-file transcription for WAV, MP3, AAC, M4A, and FLAC uploads
   (up to 50 files), with sequential per-file processing, retry, direct text,
-  time-coded segment preview, and SRT download;
+  time-coded segment preview, SRT download, and copy/download of all completed
+  transcription text in one file;
 - authenticated model-download status and a **Copy agent prompt** flow for
   configuring Codex or Claude Code without exposing the token before login.
 

@@ -18,9 +18,9 @@ fn landing_page_covers_the_broader_workflow_without_a_hero_illustration() {
     assert!(STYLES.contains(".endpoint-card {\n  display: flex; gap: 14px; align-items: center;\n  max-width: 620px;\n  margin-top: 30px;"));
     assert!(!STYLES.contains(".hero-visual"));
     assert!(!STYLES.contains(".hero-art"));
-    assert!(INDEX.contains("/static/styles.css?v=20260728-landing-session"));
-    assert!(DOCS.contains("/static/styles.css?v=20260728-landing-session"));
-    assert!(INDEX.contains("/static/app.js?v=20260728-landing-session"));
+    assert!(INDEX.contains("/static/styles.css?v=20260821-transcription-export"));
+    assert!(DOCS.contains("/static/styles.css?v=20260821-transcription-export"));
+    assert!(INDEX.contains("/static/app.js?v=20260821-transcription-export"));
 }
 
 #[test]

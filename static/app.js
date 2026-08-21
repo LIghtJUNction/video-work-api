@@ -127,6 +127,10 @@ const translations = {
     transcriptionText: "识别文本",
     transcriptionSegments: "时间码片段（{count}）",
     audioTranscriptionBatchReady: "录音批量转写完成",
+    copyAllTranscriptions: "复制全部文字",
+    copiedAllTranscriptions: "已复制 ✓",
+    copyAllTranscriptionsFailed: "无法复制全部文字，请手动复制。",
+    downloadAllTranscriptions: "下载全部文字",
     translateEyebrow: "TRANSLATE",
     translateTitle: "多语言翻译",
     translateLead: "使用 MADLAD-400-3B 翻译纯文本或 SRT；英文与俄语排在语言列表前两位。",
@@ -273,6 +277,10 @@ const translations = {
     transcriptionText: "Recognized text",
     transcriptionSegments: "Time-coded segments ({count})",
     audioTranscriptionBatchReady: "Recording batch transcription complete",
+    copyAllTranscriptions: "Copy all text",
+    copiedAllTranscriptions: "Copied ✓",
+    copyAllTranscriptionsFailed: "Could not copy all text. Please copy it manually.",
+    downloadAllTranscriptions: "Download all text",
     translateEyebrow: "TRANSLATE",
     translateTitle: "Translate",
     translateLead: "Translate plain text or SRT with MADLAD-400-3B. English and Russian are listed first.",
@@ -333,6 +341,7 @@ let generationEpoch = 0;
 let subtitleEpoch = 0;
 let audioTranscriptionEpoch = 0;
 let audioTranscriptionControlsDisabled = false;
+let audioTranscriptionCopyFeedbackTimer = null;
 let logoutInProgress = false;
 
 const {
@@ -340,6 +349,7 @@ const {
   parseNonEmptyLines,
   parseWholeTextItem,
   shouldShowSingleGenerationAction,
+  formatTranscriptionResults,
   validateItems,
   runSequential,
 } = window.BatchCore;
@@ -1426,6 +1436,7 @@ function updateBatchProgress(kind, jobs) {
   text.textContent = tf("batchProgress", { ...counts, total: jobs.length });
   retry.textContent = tf("retryFailures", { count: counts.failed });
   retry.classList.toggle("hidden", counts.failed === 0 || jobs.some((job) => job.status === "running"));
+  if (kind === "audioTranscription") updateAudioTranscriptionBatchActions();
 }
 
 function setGenerationControlsDisabled(disabled) {
@@ -1955,6 +1966,52 @@ function revokeAudioTranscriptionUrls(jobs = audioTranscriptionJobs) {
   });
 }
 
+function allAudioTranscriptionText() {
+  return formatTranscriptionResults(audioTranscriptionJobs);
+}
+
+function updateAudioTranscriptionBatchActions() {
+  const hasResults = Boolean(allAudioTranscriptionText());
+  [$("#copyAllAudioTranscriptions"), $("#downloadAllAudioTranscriptions")].forEach((button) => {
+    if (!button) return;
+    button.classList.toggle("hidden", !hasResults);
+    button.disabled = !hasResults;
+  });
+}
+
+async function copyAllAudioTranscriptions() {
+  const text = allAudioTranscriptionText();
+  if (!text) return;
+  const button = $("#copyAllAudioTranscriptions");
+  const copied = await copyTextToClipboard(text);
+  if (!copied) {
+    notice(t("copyAllTranscriptionsFailed"));
+    return;
+  }
+  if (!button) return;
+  if (audioTranscriptionCopyFeedbackTimer !== null) {
+    clearTimeout(audioTranscriptionCopyFeedbackTimer);
+  }
+  button.textContent = t("copiedAllTranscriptions");
+  audioTranscriptionCopyFeedbackTimer = setTimeout(() => {
+    button.textContent = t("copyAllTranscriptions");
+    audioTranscriptionCopyFeedbackTimer = null;
+  }, 1600);
+}
+
+function downloadAllAudioTranscriptions() {
+  const text = allAudioTranscriptionText();
+  if (!text) return;
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "recording-transcriptions.txt";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 function resetAudioTranscriptionBatch(unlock = true) {
   audioTranscriptionEpoch += 1;
   revokeAudioTranscriptionUrls();
@@ -2134,6 +2191,14 @@ if (retryAudioTranscriptionFailures) {
     runAudioTranscriptionJobs(
       audioTranscriptionJobs.filter((job) => job.status === "failed"),
     );
+}
+const copyAllAudioTranscriptionsButton = $("#copyAllAudioTranscriptions");
+if (copyAllAudioTranscriptionsButton) {
+  copyAllAudioTranscriptionsButton.onclick = copyAllAudioTranscriptions;
+}
+const downloadAllAudioTranscriptionsButton = $("#downloadAllAudioTranscriptions");
+if (downloadAllAudioTranscriptionsButton) {
+  downloadAllAudioTranscriptionsButton.onclick = downloadAllAudioTranscriptions;
 }
 
 let translationDownloadPoll = null;

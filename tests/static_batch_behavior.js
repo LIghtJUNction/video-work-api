@@ -4,6 +4,7 @@ const {
   parseNonEmptyLines,
   parseWholeTextItem,
   shouldShowSingleGenerationAction,
+  formatTranscriptionResults,
   validateItems,
   runSequential,
 } = require("../static/batch-core.js");
@@ -52,6 +53,18 @@ test("accepts at most 50 non-empty lines", () => {
   assert.equal(
     validateItems([...fifty, "overflow"], { maxItems: 50, maxChars: 1200 }).type,
     "too_many",
+  );
+});
+
+test("formats all completed transcription results with source labels", () => {
+  const output = formatTranscriptionResults([
+    { label: "meeting.m4a", status: "complete", result: { text: "First result" } },
+    { label: "failed.wav", status: "failed", result: { text: "Do not include" } },
+    { label: "interview.flac", status: "complete", result: { text: "Second result" } },
+  ]);
+  assert.equal(
+    output,
+    "[1] meeting.m4a\nFirst result\n\n[2] interview.flac\nSecond result",
   );
 });
 
