@@ -71,6 +71,14 @@ struct ArchiveEntry {
     sha256: String,
 }
 
+fn archived_files(journal: &ArchiveJournal) -> Vec<String> {
+    journal
+        .entries
+        .iter()
+        .map(|entry| entry.source_relative.clone())
+        .collect()
+}
+
 const TEMP_ROOTS: &[&str] = &["cache", "proxies", "passes"];
 const TEMP_FILE_SUFFIXES: &[&str] = &[".cache", ".proxy.mp4", ".pass.wav"];
 
@@ -172,11 +180,7 @@ pub fn archive_completed_sources(
             dry_run: request.dry_run,
             archived: true,
             idempotent: true,
-            files: journal
-                .entries
-                .iter()
-                .map(|entry| entry.source_relative.clone())
-                .collect(),
+            files: archived_files(&journal),
             archive_directory: archive_relative,
         });
     }
@@ -225,11 +229,7 @@ pub fn archive_completed_sources(
                 dry_run: true,
                 archived: false,
                 idempotent: false,
-                files: journal
-                    .entries
-                    .iter()
-                    .map(|entry| entry.source_relative.clone())
-                    .collect(),
+                files: archived_files(&journal),
                 archive_directory: archive_relative,
             });
         }
@@ -242,11 +242,7 @@ pub fn archive_completed_sources(
             dry_run: true,
             archived: false,
             idempotent: false,
-            files: journal
-                .entries
-                .iter()
-                .map(|entry| entry.source_relative.clone())
-                .collect(),
+            files: archived_files(&journal),
             archive_directory: archive_relative,
         });
     }
@@ -265,11 +261,7 @@ pub fn archive_completed_sources(
         dry_run: false,
         archived: true,
         idempotent: false,
-        files: journal
-            .entries
-            .iter()
-            .map(|entry| entry.source_relative.clone())
-            .collect(),
+        files: archived_files(&journal),
         archive_directory: archive_relative,
     })
 }
